@@ -243,12 +243,21 @@ export async function uploadFile(
   try {
     const client = getMinioClient()
 
+    // 生成路径：年/月/日/timestamp_filename
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const timestamp = now.getTime()
+
+    const path = `${year}/${month}/${day}/${timestamp}_${file.name}`
+
     const fileBuffer = await file.arrayBuffer()
 
     await client.send(
       new PutObjectCommand({
         Bucket: bucketName,
-        Key: file.name,
+        Key: path,
         Body: new Uint8Array(fileBuffer),
         ContentType: file.type,
       })
@@ -260,6 +269,31 @@ export async function uploadFile(
   } catch (error) {
     console.error('上传文件失败:', error)
     throw new Error('上传文件失败')
+  }
+}
+
+/**
+ * 批量删除文件
+ */
+export async function batchRemoveObjects(
+  bucketName: string,
+  objectNames: string[]
+): Promise<void> {
+  try {
+    const client = getMinioClient()
+
+    // AWS SDK 需要逐个删除
+    for (const objectName of objectNames) {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: objectName,
+        })
+      )
+    }
+  } catch (error) {
+    console.error('批量删除文件失败:', error)
+    throw new Error('批量删除文件失败')
   }
 }
 

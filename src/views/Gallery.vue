@@ -14,6 +14,8 @@ import {
   Upload,
   Refresh,
   Plus,
+  Select,
+  CloseBold,
 } from '@element-plus/icons-vue'
 import type { BucketInfo, FileObject } from '@/services/minio'
 import {
@@ -23,6 +25,7 @@ import {
   removeObject,
   initMinioClient,
   uploadFile,
+  batchRemoveObjects,
 } from '@/services/minio'
 import { getMinioConfig, hasMinioConfig } from '@/utils/storage'
 import type { UploadProps, UploadUserFile } from 'element-plus'
@@ -43,6 +46,10 @@ const previewFileType = ref('')
 const uploadDialogVisible = ref(false)
 const uploadFileList = ref<UploadUserFile[]>([])
 const uploading = ref(false)
+
+// 批量选择相关
+const selectionMode = ref(false)
+const selectedFiles = ref<Set<string>>(new Set())
 
 interface GroupedFiles {
   date: string
@@ -82,6 +89,12 @@ const groupedFiles = computed<GroupedFiles[]>(() => {
       const dateB = new Date(b.files[0]?.lastModified || 0)
       return dateB.getTime() - dateA.getTime()
     })
+})
+
+const selectedCount = computed(() => selectedFiles.value.size)
+
+const isAllSelected = computed(() => {
+  return files.value.length > 0 && selectedFiles.value.size === files.value.length
 })
 
 const getFileIcon = (fileType: string) => {
@@ -141,6 +154,9 @@ const loadFiles = async () => {
   if (!selectedBucket.value) return
 
   loadingFiles.value = true
+  selectedFiles.value.clear()
+  selectionMode.value = false
+
   try {
     const objectList = await listObjects(selectedBucket.value)
     files.value = objectList.map((file) => ({
@@ -177,6 +193,8 @@ const handleBucketChange = async () => {
 }
 
 const handlePreview = async (file: FileObject) => {
+  if (selectionMode.value) return
+
   try {
     const url = await getPresignedUrl(selectedBucket.value, file.name)
     previewUrl.value = url
@@ -269,6 +287,68 @@ const handleUpload = async () => {
     uploading.value = false
   }
 }
+
+// 批量选择相关方法
+const toggleSelectionMode = () => {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) {
+    selectedFiles.value.clear()
+  }
+}
+
+const toggleFileSelection = (fileName: string) => {
+  if (selectedFiles.value.has(fileName)) {
+    selectedFiles.value.delete(fileName)
+  } else {
+    selectedFiles.value.add(fileName)
+  }
+}
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedFiles.value.clear()
+  } else {
+    files.value.forEach(file => {
+      selectedFiles.value.add(file.name)
+    })
+  }
+}
+
+const handleBatchDelete = async () => {
+  if (selectedFiles.value.size === 0) {
+    ElMessage.warning('请先选择要删除的文件')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedFiles.value.size} 个文件吗？此操作不可恢复！`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+
+    const fileNames = Array.from(selectedFiles.value)
+    await batchRemoveObjects(selectedBucket.value, fileNames)
+    ElMessage.success('批量删除成功')
+    await loadFiles()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除失败：' + (error as Error).message)
+    }
+  }
+}
+
+const handleCardClick = (file: FileObject) => {
+  if (selectionMode.value) {
+    toggleFileSelection(file.name)
+  } else {
+    handlePreview(file)
+  }
+}
 </script>
 
 <template>
@@ -292,7 +372,9 @@ const handleUpload = async () => {
               :value="bucket.name"
             />
           </el-select>
+
           <el-button
+            v-if="!selectionMode"
             type="primary"
             :icon="Upload"
             @click="openUploadDialog"
@@ -300,7 +382,44 @@ const handleUpload = async () => {
           >
             上传文件
           </el-button>
+
           <el-button
+            v-if="!selectionMode"
+            :icon="Select"
+            @click="toggleSelectionMode"
+            size="large"
+          >
+            批量选择
+          </el-button>
+
+          <template v-if="selectionMode">
+            <el-button
+              type="primary"
+              @click="toggleSelectAll"
+              size="large"
+            >
+              {{ isAllSelected ? '取消全选' : '全选' }}
+            </el-button>
+            <el-button
+              type="danger"
+              :icon="Delete"
+              @click="handleBatchDelete"
+              size="large"
+              :disabled="selectedCount === 0"
+            >
+              删除选中 ({{ selectedCount }})
+            </el-button>
+            <el-button
+              :icon="CloseBold"
+              @click="toggleSelectionMode"
+              size="large"
+            >
+              取消
+            </el-button>
+          </template>
+
+          <el-button
+            v-if="!selectionMode"
             :icon="Refresh"
             @click="loadFiles"
             :loading="loadingFiles"
@@ -318,6 +437,10 @@ const handleUpload = async () => {
         <span class="stat-item">
           <span class="stat-label">图片：</span>
           <span class="stat-value">{{ files.filter(f => f.isImage).length }}</span>
+        </span>
+        <span v-if="selectionMode" class="stat-item">
+          <span class="stat-label">已选中：</span>
+          <span class="stat-value selection">{{ selectedCount }}</span>
         </span>
       </div>
     </div>
@@ -346,8 +469,23 @@ const handleUpload = async () => {
               v-for="file in group.files"
               :key="file.name"
               class="file-card"
+              :class="{
+                'selection-mode': selectionMode,
+                'selected': selectedFiles.has(file.name)
+              }"
+              @click="handleCardClick(file)"
             >
-              <div class="file-preview" @click="handlePreview(file)">
+              <!-- 选择框 -->
+              <div v-if="selectionMode" class="selection-checkbox">
+                <el-checkbox
+                  :model-value="selectedFiles.has(file.name)"
+                  @change="toggleFileSelection(file.name)"
+                  @click.stop
+                  size="large"
+                />
+              </div>
+
+              <div class="file-preview">
                 <div v-if="file.isImage" class="image-preview">
                   <img
                     v-if="file.thumbnailUrl"
@@ -360,7 +498,7 @@ const handleUpload = async () => {
                       <Picture />
                     </el-icon>
                   </div>
-                  <div class="preview-overlay">
+                  <div v-if="!selectionMode" class="preview-overlay">
                     <el-icon :size="32">
                       <ZoomIn />
                     </el-icon>
@@ -394,7 +532,7 @@ const handleUpload = async () => {
                 </div>
               </div>
 
-              <div class="file-actions">
+              <div v-if="!selectionMode" class="file-actions">
                 <el-tooltip content="预览" placement="top">
                   <el-button
                     type="primary"
@@ -464,6 +602,15 @@ const handleUpload = async () => {
       :close-on-click-modal="false"
     >
       <div class="upload-container">
+        <el-alert
+          title="文件存储规则"
+          type="info"
+          :closable="false"
+          class="mb-4"
+        >
+          文件将按照 <strong>年/月/日/时间戳_文件名</strong> 的格式存储<br />
+          例如：2026/01/17/1737202800000_image.jpg
+        </el-alert>
         <el-upload
           v-model:file-list="uploadFileList"
           drag
@@ -554,6 +701,10 @@ const handleUpload = async () => {
         color: #409eff;
         font-size: 18px;
         font-weight: 600;
+
+        &.selection {
+          color: #67c23a;
+        }
       }
     }
   }
@@ -613,10 +764,24 @@ const handleUpload = async () => {
   overflow: hidden;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  position: relative;
+
+  &.selection-mode {
+    cursor: pointer;
+  }
+
+  &.selected {
+    box-shadow: 0 0 0 3px #67c23a;
+    transform: translateY(-2px);
+  }
 
   &:hover {
     transform: translateY(-4px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+
+    &.selected {
+      box-shadow: 0 0 0 3px #67c23a, 0 8px 24px rgba(0, 0, 0, 0.15);
+    }
 
     .file-actions {
       opacity: 1;
@@ -626,6 +791,16 @@ const handleUpload = async () => {
     .preview-overlay {
       opacity: 1;
     }
+  }
+
+  .selection-checkbox {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 4px;
+    padding: 4px;
   }
 
   .file-preview {
@@ -780,5 +955,9 @@ const handleUpload = async () => {
 
 .upload-container {
   padding: 20px 0;
+
+  .mb-4 {
+    margin-bottom: 20px;
+  }
 }
 </style>

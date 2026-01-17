@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -16,6 +16,10 @@ import {
   Plus,
   Select,
   CloseBold,
+  SuccessFilled,
+  ArrowLeft,
+  ArrowRight,
+  Close,
 } from '@element-plus/icons-vue'
 import type { BucketInfo, FileObject } from '@/services/minio'
 import {
@@ -42,6 +46,11 @@ const previewVisible = ref(false)
 const previewUrl = ref('')
 const previewFileName = ref('')
 const previewFileType = ref('')
+const currentPreviewIndex = ref(0)
+const imageScale = ref(1)
+const imageTranslate = ref({ x: 0, y: 0 })
+const isDragging = ref(false)
+const dragStart = ref({ x: 0, y: 0 })
 
 const uploadDialogVisible = ref(false)
 const uploadFileList = ref<UploadUserFile[]>([])
@@ -50,6 +59,30 @@ const uploading = ref(false)
 // 批量选择相关
 const selectionMode = ref(false)
 const selectedFiles = ref<Set<string>>(new Set())
+
+// 预览相关计算属性
+const currentPreviewFile = computed(() => {
+  if (!previewVisible.value || files.value.length === 0) return null
+  return files.value[currentPreviewIndex.value]
+})
+
+const hasNextImage = computed(() => {
+  return currentPreviewIndex.value < files.value.length - 1
+})
+
+const hasPrevImage = computed(() => {
+  return currentPreviewIndex.value > 0
+})
+
+const imageTransform = computed(() => {
+  // Apply translate before scale to avoid coordinate space issues
+  return `translate(${imageTranslate.value.x}px, ${imageTranslate.value.y}px) scale(${imageScale.value})`
+})
+
+const resetImageTransform = () => {
+  imageScale.value = 1
+  imageTranslate.value = { x: 0, y: 0 }
+}
 
 interface GroupedFiles {
   date: string
@@ -121,20 +154,6 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-onMounted(async () => {
-  if (!hasMinioConfig()) {
-    ElMessage.warning('请先配置 MinIO 连接信息')
-    router.push('/settings')
-    return
-  }
-
-  const config = getMinioConfig()
-  if (config) {
-    initMinioClient(config)
-    await loadBuckets()
-  }
-})
-
 const loadBuckets = async () => {
   loading.value = true
   try {
@@ -196,15 +215,164 @@ const handlePreview = async (file: FileObject) => {
   if (selectionMode.value) return
 
   try {
+    // 找到当前文件在列表中的索引
+    const index = files.value.findIndex(f => f.name === file.name)
+    if (index !== -1) {
+      currentPreviewIndex.value = index
+    }
+
     const url = await getPresignedUrl(selectedBucket.value, file.name)
     previewUrl.value = url
     previewFileName.value = file.name
     previewFileType.value = file.fileType
     previewVisible.value = true
+
+    // 禁止页面滚动
+    document.body.style.overflow = 'hidden'
   } catch (error) {
     ElMessage.error('获取预览链接失败：' + (error as Error).message)
   }
 }
+
+const closePreview = () => {
+  previewVisible.value = false
+  previewUrl.value = ''
+  previewFileName.value = ''
+  previewFileType.value = ''
+  resetImageTransform()
+
+  // 恢复页面滚动
+  document.body.style.overflow = ''
+}
+
+const showNextImage = async () => {
+  if (!hasNextImage.value) return
+
+  currentPreviewIndex.value++
+  const nextFile = files.value[currentPreviewIndex.value]
+  resetImageTransform()
+
+  if (nextFile) {
+    try {
+      const url = await getPresignedUrl(selectedBucket.value, nextFile.name)
+      previewUrl.value = url
+      previewFileName.value = nextFile.name
+      previewFileType.value = nextFile.fileType
+    } catch (error) {
+      ElMessage.error('加载下一张失败')
+    }
+  }
+}
+
+const showPrevImage = async () => {
+  if (!hasPrevImage.value) return
+
+  currentPreviewIndex.value--
+  const prevFile = files.value[currentPreviewIndex.value]
+  resetImageTransform()
+
+  if (prevFile) {
+    try {
+      const url = await getPresignedUrl(selectedBucket.value, prevFile.name)
+      previewUrl.value = url
+      previewFileName.value = prevFile.name
+      previewFileType.value = prevFile.fileType
+    } catch (error) {
+      ElMessage.error('加载上一张失败')
+    }
+  }
+}
+
+// 处理滚轮缩放
+const handleWheel = (event: WheelEvent) => {
+  if (!previewVisible.value || previewFileType.value !== 'image') return
+
+  // 检查是否按下 Ctrl 键
+  if (event.ctrlKey || event.metaKey) {
+    event.preventDefault()
+
+    const delta = event.deltaY > 0 ? -0.1 : 0.1
+    const newScale = Math.max(0.5, Math.min(5, imageScale.value + delta))
+    imageScale.value = newScale
+  }
+}
+
+// 处理鼠标按下（开始拖拽）
+const handleMouseDown = (event: MouseEvent) => {
+  if (imageScale.value <= 1) return
+
+  isDragging.value = true
+  dragStart.value = {
+    x: event.clientX - imageTranslate.value.x,
+    y: event.clientY - imageTranslate.value.y,
+  }
+}
+
+// 处理鼠标移动（拖拽中）
+const handleMouseMove = (event: MouseEvent) => {
+  if (!isDragging.value) return
+
+  const newX = event.clientX - dragStart.value.x
+  const newY = event.clientY - dragStart.value.y
+
+  // 添加边界限制，防止图片飞太远（限制在屏幕的2倍范围内）
+  const maxOffset = Math.max(window.innerWidth, window.innerHeight) * 1.5
+
+  imageTranslate.value = {
+    x: Math.max(-maxOffset, Math.min(maxOffset, newX)),
+    y: Math.max(-maxOffset, Math.min(maxOffset, newY)),
+  }
+}
+
+// 处理鼠标松开（结束拖拽）
+const handleMouseUp = () => {
+  isDragging.value = false
+}
+
+const handlePreviewKeydown = (event: KeyboardEvent) => {
+  if (!previewVisible.value) return
+
+  if (event.key === 'ArrowRight') {
+    showNextImage()
+  } else if (event.key === 'ArrowLeft') {
+    showPrevImage()
+  } else if (event.key === 'Escape') {
+    closePreview()
+  }
+}
+
+onMounted(async () => {
+  if (!hasMinioConfig()) {
+    ElMessage.warning('请先配置 MinIO 连接信息')
+    router.push('/settings')
+    return
+  }
+
+  const config = getMinioConfig()
+  if (config) {
+    initMinioClient(config)
+    await loadBuckets()
+  }
+
+  // 添加键盘事件监听
+  window.addEventListener('keydown', handlePreviewKeydown)
+  // 添加滚轮事件监听（用于图片缩放）
+  window.addEventListener('wheel', handleWheel, { passive: false })
+  // 添加鼠标事件监听（用于图片拖拽）
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('mouseup', handleMouseUp)
+})
+
+// 清理事件监听
+import { onUnmounted } from 'vue'
+onUnmounted(() => {
+  window.removeEventListener('keydown', handlePreviewKeydown)
+  window.removeEventListener('wheel', handleWheel)
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('mouseup', handleMouseUp)
+  // 确保恢复页面滚动
+  document.body.style.overflow = ''
+})
 
 const handleDownload = async (file: FileObject) => {
   try {
@@ -238,13 +406,6 @@ const handleDelete = async (file: FileObject) => {
       ElMessage.error('删除失败：' + (error as Error).message)
     }
   }
-}
-
-const closePreview = () => {
-  previewVisible.value = false
-  previewUrl.value = ''
-  previewFileName.value = ''
-  previewFileType.value = ''
 }
 
 const openUploadDialog = () => {
@@ -475,14 +636,18 @@ const handleCardClick = (file: FileObject) => {
               }"
               @click="handleCardClick(file)"
             >
-              <!-- 选择框 -->
-              <div v-if="selectionMode" class="selection-checkbox">
-                <el-checkbox
-                  :model-value="selectedFiles.has(file.name)"
-                  @change="toggleFileSelection(file.name)"
-                  @click.stop
-                  size="large"
-                />
+              <!-- 选择指示器 -->
+              <div
+                v-if="selectionMode"
+                class="selection-indicator"
+                :class="{ selected: selectedFiles.has(file.name) }"
+                @click.stop="toggleFileSelection(file.name)"
+              >
+                <transition name="check-fade">
+                  <el-icon v-if="selectedFiles.has(file.name)" :size="18">
+                    <SuccessFilled />
+                  </el-icon>
+                </transition>
               </div>
 
               <div class="file-preview">
@@ -567,32 +732,80 @@ const handleCardClick = (file: FileObject) => {
       </div>
     </div>
 
-    <!-- 预览对话框 -->
-    <el-dialog
-      v-model="previewVisible"
-      :title="previewFileName"
-      width="90%"
-      @close="closePreview"
-      class="preview-dialog"
-    >
-      <div class="preview-content">
-        <img
-          v-if="previewFileType === 'image'"
-          :src="previewUrl"
-          :alt="previewFileName"
-          class="preview-image"
-        />
-        <div v-else class="preview-other">
-          <el-icon :size="80" class="file-icon">
-            <component :is="getFileIcon(previewFileType)" />
+    <!-- 全屏预览 -->
+    <transition name="preview-fade">
+      <div v-if="previewVisible" class="preview-overlay" @click="closePreview">
+        <!-- 关闭按钮 -->
+        <div class="preview-close" @click="closePreview">
+          <el-icon :size="28">
+            <Close />
           </el-icon>
-          <p class="file-name-text">{{ previewFileName }}</p>
-          <el-button type="primary" @click="window.open(previewUrl, '_blank')">
-            在新窗口打开
-          </el-button>
+        </div>
+
+        <!-- 左箭头 -->
+        <transition name="arrow-fade">
+          <div
+            v-if="hasPrevImage && previewFileType === 'image'"
+            class="preview-arrow preview-arrow-left"
+            @click.stop="showPrevImage"
+          >
+            <el-icon :size="40">
+              <ArrowLeft />
+            </el-icon>
+          </div>
+        </transition>
+
+        <!-- 右箭头 -->
+        <transition name="arrow-fade">
+          <div
+            v-if="hasNextImage && previewFileType === 'image'"
+            class="preview-arrow preview-arrow-right"
+            @click.stop="showNextImage"
+          >
+            <el-icon :size="40">
+              <ArrowRight />
+            </el-icon>
+          </div>
+        </transition>
+
+        <!-- 内容区域 -->
+        <div class="preview-container" @click.stop>
+          <div v-if="previewFileType === 'image'" class="preview-image-wrapper">
+            <img
+              :src="previewUrl"
+              :alt="previewFileName"
+              class="preview-image"
+              :style="{ transform: imageTransform, cursor: imageScale > 1 ? 'move' : 'default' }"
+              @mousedown="handleMouseDown"
+              draggable="false"
+            />
+          </div>
+          <div v-else class="preview-file-wrapper">
+            <el-icon :size="100" class="file-icon">
+              <component :is="getFileIcon(previewFileType)" />
+            </el-icon>
+            <el-button
+              type="primary"
+              size="large"
+              class="mt-6"
+              @click="window.open(previewUrl, '_blank')"
+            >
+              在新窗口打开
+            </el-button>
+          </div>
+
+          <!-- 文件名和缩放提示 -->
+          <div class="preview-footer">
+            <div class="preview-filename">
+              {{ previewFileName }}
+            </div>
+            <div v-if="previewFileType === 'image' && imageScale !== 1" class="preview-scale-info">
+              {{ Math.round(imageScale * 100) }}%
+            </div>
+          </div>
         </div>
       </div>
-    </el-dialog>
+    </transition>
 
     <!-- 上传对话框 -->
     <el-dialog
@@ -793,14 +1006,57 @@ const handleCardClick = (file: FileObject) => {
     }
   }
 
-  .selection-checkbox {
+  .selection-indicator {
     position: absolute;
     top: 12px;
     left: 12px;
     z-index: 10;
-    background: rgba(255, 255, 255, 0.9);
-    border-radius: 4px;
-    padding: 4px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(255, 255, 255, 0.95);
+    border: 2px solid #dcdfe6;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(4px);
+
+    &:hover {
+      transform: scale(1.15);
+      border-color: #67c23a;
+      box-shadow: 0 4px 16px rgba(103, 194, 58, 0.3);
+    }
+
+    &.selected {
+      background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%);
+      border-color: #67c23a;
+      color: white;
+      box-shadow: 0 4px 16px rgba(103, 194, 58, 0.4);
+
+      &:hover {
+        transform: scale(1.15);
+        background: linear-gradient(135deg, #85ce61 0%, #95d475 100%);
+        box-shadow: 0 6px 20px rgba(103, 194, 58, 0.5);
+      }
+    }
+  }
+
+  .check-fade-enter-active,
+  .check-fade-leave-active {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .check-fade-enter-from {
+    opacity: 0;
+    transform: scale(0);
+  }
+
+  .check-fade-leave-to {
+    opacity: 0;
+    transform: scale(0);
   }
 
   .file-preview {
@@ -917,40 +1173,192 @@ const handleCardClick = (file: FileObject) => {
   }
 }
 
-.preview-dialog {
-  .preview-content {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 400px;
-    max-height: 75vh;
+// 全屏预览样式
+.preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
 
-    .preview-image {
-      max-width: 100%;
-      max-height: 75vh;
-      object-fit: contain;
-      border-radius: 8px;
-    }
+.preview-close {
+  position: absolute;
+  top: 30px;
+  right: 30px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: white;
+  z-index: 10001;
 
-    .preview-other {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 20px;
-      padding: 40px;
-
-      .file-icon {
-        color: #909399;
-      }
-
-      .file-name-text {
-        font-size: 16px;
-        color: #606266;
-        word-break: break-all;
-        text-align: center;
-      }
-    }
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: rotate(90deg) scale(1.1);
   }
+}
+
+.preview-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: white;
+  z-index: 10001;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-50%) scale(1.15);
+  }
+
+  &.preview-arrow-left {
+    left: 40px;
+  }
+
+  &.preview-arrow-right {
+    right: 40px;
+  }
+}
+
+.preview-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  position: relative;
+}
+
+.preview-image-wrapper {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: visible;
+  padding: 40px;
+
+  .preview-image {
+    max-width: 90vw;
+    max-height: calc(90vh - 120px);
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    transition: transform 0.1s ease-out;
+    user-select: none;
+    transform-origin: center center;
+    position: relative;
+    z-index: 1;
+  }
+}
+
+.preview-file-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  padding: 60px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+
+  .file-icon {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .mt-6 {
+    margin-top: 24px;
+  }
+}
+
+.preview-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+.preview-filename {
+  padding: 12px 24px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  max-width: 70vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.preview-scale-info {
+  padding: 8px 16px;
+  background: rgba(64, 158, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+// 预览淡入淡出动画
+.preview-fade-enter-active,
+.preview-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.preview-fade-enter-from {
+  opacity: 0;
+}
+
+.preview-fade-leave-to {
+  opacity: 0;
+}
+
+.arrow-fade-enter-active,
+.arrow-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.arrow-fade-enter-from,
+.arrow-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.8);
 }
 
 .upload-container {
@@ -961,3 +1369,4 @@ const handleCardClick = (file: FileObject) => {
   }
 }
 </style>
+

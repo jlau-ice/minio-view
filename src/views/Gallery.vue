@@ -168,7 +168,8 @@
             <el-icon :size="100" class="file-icon">
               <component :is="getFileIcon(previewFileType)" />
             </el-icon>
-            <el-button type="primary" size="large" class="mt-6" @click="window.open(previewUrl, '_blank')"> 在新窗口打开 </el-button>
+            <el-button type="primary" size="large" class="mt-6" @click="handleOpen">在新窗口打开</el-button>
+            <!-- <el-button type="primary" size="large" class="mt-6" @click="window.open(previewUrl, '_blank')"> 在新窗口打开 </el-button> -->
           </div>
 
           <!-- 文件名和缩放提示 -->
@@ -262,10 +263,10 @@ const selectionMode = ref(false)
 const selectedFiles = ref<Set<string>>(new Set())
 
 // 预览相关计算属性
-const currentPreviewFile = computed(() => {
-  if (!previewVisible.value || files.value.length === 0) return null
-  return files.value[currentPreviewIndex.value]
-})
+// const currentPreviewFile = computed(() => {
+//   if (!previewVisible.value || files.value.length === 0) return null
+//   return files.value[currentPreviewIndex.value]
+// })
 
 const hasNextImage = computed(() => {
   return currentPreviewIndex.value < files.value.length - 1
@@ -294,6 +295,12 @@ interface FileWithUrl extends FileObject {
   thumbnailUrl?: string
   loading?: boolean
 }
+
+const handleOpen = () => {
+  if (previewUrl.value) {
+    window.open(previewUrl.value, '_blank', 'noopener,noreferrer');
+  }
+};
 
 const groupedFiles = computed<GroupedFiles[]>(() => {
   const groups: Record<string, FileWithUrl[]> = {}
@@ -543,7 +550,7 @@ const handlePreviewKeydown = (event: KeyboardEvent) => {
 onMounted(async () => {
   if (!hasMinioConfig()) {
     ElMessage.warning('请先配置 MinIO 连接信息')
-    router.push('/settings')
+    await router.push('/settings')
     return
   }
 
@@ -562,8 +569,7 @@ onMounted(async () => {
   window.addEventListener('mouseup', handleMouseUp)
 })
 
-// 清理事件监听
-import { onUnmounted } from 'vue'
+
 onUnmounted(() => {
   window.removeEventListener('keydown', handlePreviewKeydown)
   window.removeEventListener('wheel', handleWheel)
@@ -613,10 +619,12 @@ const openUploadDialog = () => {
 }
 
 const handleUploadChange: UploadProps['onChange'] = (uploadFile, uploadFiles) => {
+  console.log('handleUploadChange', uploadFile, uploadFiles)
   uploadFileList.value = uploadFiles
 }
 
 const handleUploadRemove: UploadProps['onRemove'] = (uploadFile, uploadFiles) => {
+  console.log('handleUploadChange', uploadFile, uploadFiles)
   uploadFileList.value = uploadFiles
 }
 

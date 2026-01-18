@@ -1,13 +1,47 @@
+<template>
+  <div class="settings-container">
+    <el-card class="settings-card">
+      <template #header>
+        <div class="card-header">
+          <span class="title">MinIO 配置</span>
+        </div>
+      </template>
+      <el-form ref="formRef" :model="configForm" :rules="rules" label-width="120px" class="config-form">
+        <el-form-item label="服务地址" prop="endpoint">
+          <el-input v-model="configForm.endpoint" placeholder="例如: 192.168.1.100 或 minio.example.com" />
+        </el-form-item>
+        <el-form-item label="端口" prop="port">
+          <el-input-number v-model="configForm.port" :min="1" :max="65535" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="使用 SSL">
+          <el-switch v-model="configForm.useSSL" />
+          <span class="form-tip">是否使用 HTTPS 连接</span>
+        </el-form-item>
+        <el-form-item label="Access Key" prop="accessKey">
+          <el-input v-model="configForm.accessKey" placeholder="请输入 Access Key" />
+        </el-form-item>
+        <el-form-item label="Secret Key" prop="secretKey">
+          <el-input v-model="configForm.secretKey" type="password" placeholder="请输入 Secret Key" show-password />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="loading" @click="handleSave"> 保存配置 </el-button>
+          <el-button :loading="testing" @click="handleTestConnection"> 测试连接 </el-button>
+          <el-button @click="handleClear">清除配置</el-button>
+        </el-form-item>
+      </el-form>
+      <el-alert title="安全提示" type="info" :closable="false" class="security-tip">
+        <p>您的 MinIO 凭证将使用 AES 加密存储在浏览器本地，不会上传到任何服务器。</p>
+        <p>建议定期更换密钥以确保安全。</p>
+      </el-alert>
+    </el-card>
+  </div>
+</template>
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import type { MinioConfig } from '@/utils/storage'
-import {
-  saveMinioConfig,
-  getMinioConfig,
-  clearMinioConfig,
-} from '@/utils/storage'
+import { saveMinioConfig, getMinioConfig, clearMinioConfig } from '@/utils/storage'
 import { testConnection, initMinioClient } from '@/services/minio'
 
 const router = useRouter()
@@ -25,9 +59,7 @@ const loading = ref(false)
 const testing = ref(false)
 
 const rules = {
-  endpoint: [
-    { required: true, message: '请输入 MinIO 服务地址', trigger: 'blur' },
-  ],
+  endpoint: [{ required: true, message: '请输入 MinIO 服务地址', trigger: 'blur' }],
   port: [{ required: true, message: '请输入端口号', trigger: 'blur' }],
   accessKey: [{ required: true, message: '请输入 Access Key', trigger: 'blur' }],
   secretKey: [{ required: true, message: '请输入 Secret Key', trigger: 'blur' }],
@@ -104,83 +136,6 @@ const handleClear = () => {
   ElMessage.success('配置已清除')
 }
 </script>
-
-<template>
-  <div class="settings-container">
-    <el-card class="settings-card">
-      <template #header>
-        <div class="card-header">
-          <span class="title">MinIO 配置</span>
-        </div>
-      </template>
-
-      <el-form
-        ref="formRef"
-        :model="configForm"
-        :rules="rules"
-        label-width="120px"
-        class="config-form"
-      >
-        <el-form-item label="服务地址" prop="endpoint">
-          <el-input
-            v-model="configForm.endpoint"
-            placeholder="例如: 192.168.1.100 或 minio.example.com"
-          />
-        </el-form-item>
-
-        <el-form-item label="端口" prop="port">
-          <el-input-number
-            v-model="configForm.port"
-            :min="1"
-            :max="65535"
-            controls-position="right"
-          />
-        </el-form-item>
-
-        <el-form-item label="使用 SSL">
-          <el-switch v-model="configForm.useSSL" />
-          <span class="form-tip">是否使用 HTTPS 连接</span>
-        </el-form-item>
-
-        <el-form-item label="Access Key" prop="accessKey">
-          <el-input
-            v-model="configForm.accessKey"
-            placeholder="请输入 Access Key"
-          />
-        </el-form-item>
-
-        <el-form-item label="Secret Key" prop="secretKey">
-          <el-input
-            v-model="configForm.secretKey"
-            type="password"
-            placeholder="请输入 Secret Key"
-            show-password
-          />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="handleSave">
-            保存配置
-          </el-button>
-          <el-button :loading="testing" @click="handleTestConnection">
-            测试连接
-          </el-button>
-          <el-button @click="handleClear">清除配置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <el-alert
-        title="安全提示"
-        type="info"
-        :closable="false"
-        class="security-tip"
-      >
-        <p>您的 MinIO 凭证将使用 AES 加密存储在浏览器本地，不会上传到任何服务器。</p>
-        <p>建议定期更换密钥以确保安全。</p>
-      </el-alert>
-    </el-card>
-  </div>
-</template>
 
 <style scoped lang="scss">
 .settings-container {

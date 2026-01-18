@@ -1,3 +1,212 @@
+<template>
+  <div class="gallery-container">
+    <div class="header-section">
+      <div class="header-content">
+        <h1 class="page-title">图库</h1>
+        <div class="header-actions">
+          <el-select v-model="selectedBucket" placeholder="请选择桶" @change="handleBucketChange" :loading="loading" size="large" class="bucket-select">
+            <el-option v-for="bucket in buckets" :key="bucket.name" :label="bucket.name" :value="bucket.name" />
+          </el-select>
+          <el-button v-if="!selectionMode" type="primary" :icon="Upload" @click="openUploadDialog" size="large"> 上传文件 </el-button>
+          <el-button v-if="!selectionMode" :icon="Select" @click="toggleSelectionMode" size="large"> 批量选择 </el-button>
+          <template v-if="selectionMode">
+            <el-button type="primary" @click="toggleSelectAll" size="large">
+              {{ isAllSelected ? '取消全选' : '全选' }}
+            </el-button>
+            <el-button type="danger" :icon="Delete" @click="handleBatchDelete" size="large" :disabled="selectedCount === 0"> 删除选中 ({{ selectedCount }}) </el-button>
+            <el-button :icon="CloseBold" @click="toggleSelectionMode" size="large"> 取消 </el-button>
+          </template>
+          <el-button v-if="!selectionMode" :icon="Refresh" @click="loadFiles" :loading="loadingFiles" size="large"> 刷新 </el-button>
+        </div>
+      </div>
+      <div class="stats-bar">
+        <span class="stat-item">
+          <span class="stat-label">总文件数：</span>
+          <span class="stat-value">{{ files.length }}</span>
+        </span>
+        <span class="stat-item">
+          <span class="stat-label">图片：</span>
+          <span class="stat-value">{{ files.filter((f) => f.isImage).length }}</span>
+        </span>
+        <span v-if="selectionMode" class="stat-item">
+          <span class="stat-label">已选中：</span>
+          <span class="stat-value selection">{{ selectedCount }}</span>
+        </span>
+      </div>
+    </div>
+
+    <div v-loading="loadingFiles" class="timeline-container">
+      <div v-if="groupedFiles.length === 0" class="empty-state">
+        <el-empty description="暂无文件">
+          <el-button type="primary" @click="openUploadDialog" :icon="Plus"> 上传第一个文件 </el-button>
+        </el-empty>
+      </div>
+
+      <div v-else class="timeline">
+        <div v-for="group in groupedFiles" :key="group.date" class="timeline-group">
+          <div class="timeline-date">
+            <span class="date-text">{{ group.date }}</span>
+            <span class="date-count">{{ group.files.length }} 个文件</span>
+          </div>
+          <div class="files-grid">
+            <div
+              v-for="file in group.files"
+              :key="file.name"
+              class="file-card"
+              :class="{
+                'selection-mode': selectionMode,
+                selected: selectedFiles.has(file.name),
+              }"
+              @click="handleCardClick(file)">
+              <!-- 选择指示器 -->
+              <div v-if="selectionMode" class="selection-indicator" :class="{ selected: selectedFiles.has(file.name) }" @click.stop="toggleFileSelection(file.name)">
+                <transition name="check-fade">
+                  <el-icon v-if="selectedFiles.has(file.name)" :size="18">
+                    <SuccessFilled />
+                  </el-icon>
+                </transition>
+              </div>
+              <div class="file-preview">
+                <div v-if="file.isImage" class="image-preview">
+                  <img v-if="file.thumbnailUrl" :src="file.thumbnailUrl" :alt="file.name" class="thumbnail-image" />
+                  <div v-else class="loading-placeholder">
+                    <el-icon class="is-loading">
+                      <Picture />
+                    </el-icon>
+                  </div>
+                  <div v-if="!selectionMode" class="preview-overlay">
+                    <el-icon :size="32">
+                      <ZoomIn />
+                    </el-icon>
+                  </div>
+                </div>
+                <div v-else class="icon-preview">
+                  <el-icon :size="48" class="file-type-icon">
+                    <component :is="getFileIcon(file.fileType)" />
+                  </el-icon>
+                  <div class="file-ext">{{ file.name.split('.').pop()?.toUpperCase() }}</div>
+                </div>
+              </div>
+
+              <div class="file-info">
+                <div class="file-name" :title="file.name">
+                  {{ file.name }}
+                </div>
+                <div class="file-meta">
+                  <span class="meta-item">
+                    <el-icon><Document /></el-icon>
+                    {{ formatFileSize(file.size) }}
+                  </span>
+                  <span class="meta-item">
+                    {{
+                      new Date(file.lastModified).toLocaleTimeString('zh-CN', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="!selectionMode" class="file-actions">
+                <el-tooltip content="预览" placement="top">
+                  <el-button type="primary" size="small" :icon="ZoomIn" @click.stop="handlePreview(file)" circle />
+                </el-tooltip>
+                <el-tooltip content="下载" placement="top">
+                  <el-button type="success" size="small" :icon="Download" @click.stop="handleDownload(file)" circle />
+                </el-tooltip>
+                <el-tooltip content="删除" placement="top">
+                  <el-button type="danger" size="small" :icon="Delete" @click.stop="handleDelete(file)" circle />
+                </el-tooltip>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全屏预览 -->
+    <transition name="preview-fade">
+      <div v-if="previewVisible" class="preview-overlay" @click="closePreview">
+        <!-- 关闭按钮 -->
+        <div class="preview-close" @click="closePreview">
+          <el-icon :size="28">
+            <Close />
+          </el-icon>
+        </div>
+
+        <!-- 左箭头 -->
+        <transition name="arrow-fade">
+          <div v-if="hasPrevImage && previewFileType === 'image'" class="preview-arrow preview-arrow-left" @click.stop="showPrevImage">
+            <el-icon :size="40">
+              <ArrowLeft />
+            </el-icon>
+          </div>
+        </transition>
+
+        <!-- 右箭头 -->
+        <transition name="arrow-fade">
+          <div v-if="hasNextImage && previewFileType === 'image'" class="preview-arrow preview-arrow-right" @click.stop="showNextImage">
+            <el-icon :size="40">
+              <ArrowRight />
+            </el-icon>
+          </div>
+        </transition>
+
+        <!-- 内容区域 -->
+        <div class="preview-container" @click.stop>
+          <div v-if="previewFileType === 'image'" class="preview-image-wrapper">
+            <img
+              :src="previewUrl"
+              :alt="previewFileName"
+              class="preview-image"
+              :style="{ transform: imageTransform, cursor: imageScale > 1 ? 'move' : 'default' }"
+              @mousedown="handleMouseDown"
+              draggable="false" />
+          </div>
+          <div v-else class="preview-file-wrapper">
+            <el-icon :size="100" class="file-icon">
+              <component :is="getFileIcon(previewFileType)" />
+            </el-icon>
+            <el-button type="primary" size="large" class="mt-6" @click="window.open(previewUrl, '_blank')"> 在新窗口打开 </el-button>
+          </div>
+
+          <!-- 文件名和缩放提示 -->
+          <div class="preview-footer">
+            <div class="preview-filename">
+              {{ previewFileName }}
+            </div>
+            <div v-if="previewFileType === 'image' && imageScale !== 1" class="preview-scale-info">{{ Math.round(imageScale * 100) }}%</div>
+          </div>
+        </div>
+      </div>
+    </transition>
+    <!-- 上传对话框 -->
+    <el-dialog v-model="uploadDialogVisible" title="上传文件" width="600px" :close-on-click-modal="false">
+      <div class="upload-container">
+        <el-alert title="文件存储规则" type="info" :closable="false" class="mb-4">
+          文件将按照 <strong>年/月/日/时间戳_文件名</strong> 的格式存储<br />
+          例如：2026/01/17/1737202800000_image.jpg
+        </el-alert>
+        <el-upload v-model:file-list="uploadFileList" drag multiple :auto-upload="false" :on-change="handleUploadChange" :on-remove="handleUploadRemove">
+          <el-icon class="el-icon--upload"><Upload /></el-icon>
+          <div class="el-upload__text">将文件拖到此处，或<em>点击选择</em></div>
+          <template #tip>
+            <div class="el-upload__tip">支持任意类型的文件</div>
+          </template>
+        </el-upload>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="uploadDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleUpload" :loading="uploading" :disabled="uploadFileList.length === 0">
+            {{ uploading ? '上传中...' : '开始上传' }}
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
+  </div>
+</template>
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -22,15 +231,7 @@ import {
   Close,
 } from '@element-plus/icons-vue'
 import type { BucketInfo, FileObject } from '@/services/minio'
-import {
-  listBuckets,
-  listObjects,
-  getPresignedUrl,
-  removeObject,
-  initMinioClient,
-  uploadFile,
-  batchRemoveObjects,
-} from '@/services/minio'
+import { listBuckets, listObjects, getPresignedUrl, removeObject, initMinioClient, uploadFile, batchRemoveObjects } from '@/services/minio'
 import { getMinioConfig, hasMinioConfig } from '@/utils/storage'
 import type { UploadProps, UploadUserFile } from 'element-plus'
 
@@ -113,9 +314,7 @@ const groupedFiles = computed<GroupedFiles[]>(() => {
   return Object.entries(groups)
     .map(([date, files]) => ({
       date,
-      files: files.sort(
-        (a, b) => b.lastModified.getTime() - a.lastModified.getTime()
-      ),
+      files: files.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime()),
     }))
     .sort((a, b) => {
       const dateA = new Date(a.files[0]?.lastModified || 0)
@@ -216,7 +415,7 @@ const handlePreview = async (file: FileObject) => {
 
   try {
     // 找到当前文件在列表中的索引
-    const index = files.value.findIndex(f => f.name === file.name)
+    const index = files.value.findIndex((f) => f.name === file.name)
     if (index !== -1) {
       currentPreviewIndex.value = index
     }
@@ -388,15 +587,11 @@ const handleDownload = async (file: FileObject) => {
 
 const handleDelete = async (file: FileObject) => {
   try {
-    await ElMessageBox.confirm(
-      `确定要删除文件 "${file.name}" 吗？此操作不可恢复！`,
-      '删除确认',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
+    await ElMessageBox.confirm(`确定要删除文件 "${file.name}" 吗？此操作不可恢复！`, '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
 
     await removeObject(selectedBucket.value, file.name)
     ElMessage.success('删除成功')
@@ -469,7 +664,7 @@ const toggleSelectAll = () => {
   if (isAllSelected.value) {
     selectedFiles.value.clear()
   } else {
-    files.value.forEach(file => {
+    files.value.forEach((file) => {
       selectedFiles.value.add(file.name)
     })
   }
@@ -482,15 +677,11 @@ const handleBatchDelete = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedFiles.value.size} 个文件吗？此操作不可恢复！`,
-      '批量删除确认',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning',
-      }
-    )
+    await ElMessageBox.confirm(`确定要删除选中的 ${selectedFiles.value.size} 个文件吗？此操作不可恢复！`, '批量删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
 
     const fileNames = Array.from(selectedFiles.value)
     await batchRemoveObjects(selectedBucket.value, fileNames)
@@ -511,352 +702,6 @@ const handleCardClick = (file: FileObject) => {
   }
 }
 </script>
-
-<template>
-  <div class="gallery-container">
-    <div class="header-section">
-      <div class="header-content">
-        <h1 class="page-title">图库</h1>
-        <div class="header-actions">
-          <el-select
-            v-model="selectedBucket"
-            placeholder="请选择桶"
-            @change="handleBucketChange"
-            :loading="loading"
-            size="large"
-            class="bucket-select"
-          >
-            <el-option
-              v-for="bucket in buckets"
-              :key="bucket.name"
-              :label="bucket.name"
-              :value="bucket.name"
-            />
-          </el-select>
-
-          <el-button
-            v-if="!selectionMode"
-            type="primary"
-            :icon="Upload"
-            @click="openUploadDialog"
-            size="large"
-          >
-            上传文件
-          </el-button>
-
-          <el-button
-            v-if="!selectionMode"
-            :icon="Select"
-            @click="toggleSelectionMode"
-            size="large"
-          >
-            批量选择
-          </el-button>
-
-          <template v-if="selectionMode">
-            <el-button
-              type="primary"
-              @click="toggleSelectAll"
-              size="large"
-            >
-              {{ isAllSelected ? '取消全选' : '全选' }}
-            </el-button>
-            <el-button
-              type="danger"
-              :icon="Delete"
-              @click="handleBatchDelete"
-              size="large"
-              :disabled="selectedCount === 0"
-            >
-              删除选中 ({{ selectedCount }})
-            </el-button>
-            <el-button
-              :icon="CloseBold"
-              @click="toggleSelectionMode"
-              size="large"
-            >
-              取消
-            </el-button>
-          </template>
-
-          <el-button
-            v-if="!selectionMode"
-            :icon="Refresh"
-            @click="loadFiles"
-            :loading="loadingFiles"
-            size="large"
-          >
-            刷新
-          </el-button>
-        </div>
-      </div>
-      <div class="stats-bar">
-        <span class="stat-item">
-          <span class="stat-label">总文件数：</span>
-          <span class="stat-value">{{ files.length }}</span>
-        </span>
-        <span class="stat-item">
-          <span class="stat-label">图片：</span>
-          <span class="stat-value">{{ files.filter(f => f.isImage).length }}</span>
-        </span>
-        <span v-if="selectionMode" class="stat-item">
-          <span class="stat-label">已选中：</span>
-          <span class="stat-value selection">{{ selectedCount }}</span>
-        </span>
-      </div>
-    </div>
-
-    <div v-loading="loadingFiles" class="timeline-container">
-      <div v-if="groupedFiles.length === 0" class="empty-state">
-        <el-empty description="暂无文件">
-          <el-button type="primary" @click="openUploadDialog" :icon="Plus">
-            上传第一个文件
-          </el-button>
-        </el-empty>
-      </div>
-
-      <div v-else class="timeline">
-        <div
-          v-for="group in groupedFiles"
-          :key="group.date"
-          class="timeline-group"
-        >
-          <div class="timeline-date">
-            <span class="date-text">{{ group.date }}</span>
-            <span class="date-count">{{ group.files.length }} 个文件</span>
-          </div>
-          <div class="files-grid">
-            <div
-              v-for="file in group.files"
-              :key="file.name"
-              class="file-card"
-              :class="{
-                'selection-mode': selectionMode,
-                'selected': selectedFiles.has(file.name)
-              }"
-              @click="handleCardClick(file)"
-            >
-              <!-- 选择指示器 -->
-              <div
-                v-if="selectionMode"
-                class="selection-indicator"
-                :class="{ selected: selectedFiles.has(file.name) }"
-                @click.stop="toggleFileSelection(file.name)"
-              >
-                <transition name="check-fade">
-                  <el-icon v-if="selectedFiles.has(file.name)" :size="18">
-                    <SuccessFilled />
-                  </el-icon>
-                </transition>
-              </div>
-
-              <div class="file-preview">
-                <div v-if="file.isImage" class="image-preview">
-                  <img
-                    v-if="file.thumbnailUrl"
-                    :src="file.thumbnailUrl"
-                    :alt="file.name"
-                    class="thumbnail-image"
-                  />
-                  <div v-else class="loading-placeholder">
-                    <el-icon class="is-loading">
-                      <Picture />
-                    </el-icon>
-                  </div>
-                  <div v-if="!selectionMode" class="preview-overlay">
-                    <el-icon :size="32">
-                      <ZoomIn />
-                    </el-icon>
-                  </div>
-                </div>
-                <div v-else class="icon-preview">
-                  <el-icon :size="48" class="file-type-icon">
-                    <component :is="getFileIcon(file.fileType)" />
-                  </el-icon>
-                  <div class="file-ext">{{ file.name.split('.').pop()?.toUpperCase() }}</div>
-                </div>
-              </div>
-
-              <div class="file-info">
-                <div class="file-name" :title="file.name">
-                  {{ file.name }}
-                </div>
-                <div class="file-meta">
-                  <span class="meta-item">
-                    <el-icon><Document /></el-icon>
-                    {{ formatFileSize(file.size) }}
-                  </span>
-                  <span class="meta-item">
-                    {{
-                      new Date(file.lastModified).toLocaleTimeString('zh-CN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    }}
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="!selectionMode" class="file-actions">
-                <el-tooltip content="预览" placement="top">
-                  <el-button
-                    type="primary"
-                    size="small"
-                    :icon="ZoomIn"
-                    @click.stop="handlePreview(file)"
-                    circle
-                  />
-                </el-tooltip>
-                <el-tooltip content="下载" placement="top">
-                  <el-button
-                    type="success"
-                    size="small"
-                    :icon="Download"
-                    @click.stop="handleDownload(file)"
-                    circle
-                  />
-                </el-tooltip>
-                <el-tooltip content="删除" placement="top">
-                  <el-button
-                    type="danger"
-                    size="small"
-                    :icon="Delete"
-                    @click.stop="handleDelete(file)"
-                    circle
-                  />
-                </el-tooltip>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 全屏预览 -->
-    <transition name="preview-fade">
-      <div v-if="previewVisible" class="preview-overlay" @click="closePreview">
-        <!-- 关闭按钮 -->
-        <div class="preview-close" @click="closePreview">
-          <el-icon :size="28">
-            <Close />
-          </el-icon>
-        </div>
-
-        <!-- 左箭头 -->
-        <transition name="arrow-fade">
-          <div
-            v-if="hasPrevImage && previewFileType === 'image'"
-            class="preview-arrow preview-arrow-left"
-            @click.stop="showPrevImage"
-          >
-            <el-icon :size="40">
-              <ArrowLeft />
-            </el-icon>
-          </div>
-        </transition>
-
-        <!-- 右箭头 -->
-        <transition name="arrow-fade">
-          <div
-            v-if="hasNextImage && previewFileType === 'image'"
-            class="preview-arrow preview-arrow-right"
-            @click.stop="showNextImage"
-          >
-            <el-icon :size="40">
-              <ArrowRight />
-            </el-icon>
-          </div>
-        </transition>
-
-        <!-- 内容区域 -->
-        <div class="preview-container" @click.stop>
-          <div v-if="previewFileType === 'image'" class="preview-image-wrapper">
-            <img
-              :src="previewUrl"
-              :alt="previewFileName"
-              class="preview-image"
-              :style="{ transform: imageTransform, cursor: imageScale > 1 ? 'move' : 'default' }"
-              @mousedown="handleMouseDown"
-              draggable="false"
-            />
-          </div>
-          <div v-else class="preview-file-wrapper">
-            <el-icon :size="100" class="file-icon">
-              <component :is="getFileIcon(previewFileType)" />
-            </el-icon>
-            <el-button
-              type="primary"
-              size="large"
-              class="mt-6"
-              @click="window.open(previewUrl, '_blank')"
-            >
-              在新窗口打开
-            </el-button>
-          </div>
-
-          <!-- 文件名和缩放提示 -->
-          <div class="preview-footer">
-            <div class="preview-filename">
-              {{ previewFileName }}
-            </div>
-            <div v-if="previewFileType === 'image' && imageScale !== 1" class="preview-scale-info">
-              {{ Math.round(imageScale * 100) }}%
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- 上传对话框 -->
-    <el-dialog
-      v-model="uploadDialogVisible"
-      title="上传文件"
-      width="600px"
-      :close-on-click-modal="false"
-    >
-      <div class="upload-container">
-        <el-alert
-          title="文件存储规则"
-          type="info"
-          :closable="false"
-          class="mb-4"
-        >
-          文件将按照 <strong>年/月/日/时间戳_文件名</strong> 的格式存储<br />
-          例如：2026/01/17/1737202800000_image.jpg
-        </el-alert>
-        <el-upload
-          v-model:file-list="uploadFileList"
-          drag
-          multiple
-          :auto-upload="false"
-          :on-change="handleUploadChange"
-          :on-remove="handleUploadRemove"
-        >
-          <el-icon class="el-icon--upload"><Upload /></el-icon>
-          <div class="el-upload__text">
-            将文件拖到此处，或<em>点击选择</em>
-          </div>
-          <template #tip>
-            <div class="el-upload__tip">支持任意类型的文件</div>
-          </template>
-        </el-upload>
-      </div>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="uploadDialogVisible = false">取消</el-button>
-          <el-button
-            type="primary"
-            @click="handleUpload"
-            :loading="uploading"
-            :disabled="uploadFileList.length === 0"
-          >
-            {{ uploading ? '上传中...' : '开始上传' }}
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
-  </div>
-</template>
 
 <style scoped lang="scss">
 .gallery-container {
@@ -993,7 +838,9 @@ const handleCardClick = (file: FileObject) => {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 
     &.selected {
-      box-shadow: 0 0 0 3px #67c23a, 0 8px 24px rgba(0, 0, 0, 0.15);
+      box-shadow:
+        0 0 0 3px #67c23a,
+        0 8px 24px rgba(0, 0, 0, 0.15);
     }
 
     .file-actions {
@@ -1369,4 +1216,3 @@ const handleCardClick = (file: FileObject) => {
   }
 }
 </style>
-

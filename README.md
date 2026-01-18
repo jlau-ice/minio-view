@@ -2,6 +2,24 @@
 
 一个基于 Vue 3 的 MinIO 对象存储图床管理工具，专为个人图床管理打造，支持文件预览、批量操作、按时间线展示等功能。
 
+## 目录
+
+- [项目简介](#项目简介)
+- [功能特性](#功能特性)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [安装和运行](#安装和运行)
+- [使用指南](#使用指南)
+- [配置说明](#配置说明)
+- [部署指南](#部署指南)
+- [常见问题](#常见问题)
+- [开发](#开发)
+- [贡献指南](#贡献指南)
+- [路线图](#路线图)
+- [许可证](#许可证)
+- [联系方式](#联系方式)
+- [致谢](#致谢)
+
 ## 项目简介
 
 MinIO View 是一个轻量级的前端应用，用于管理和查看 MinIO 对象存储中的文件。特别适合使用 PicGo + MinIO 作为图床的用户，解决了更换设备后无法查看历史上传图片的问题。
@@ -73,6 +91,32 @@ MinIO View 提供了一个基于 Web 的图库界面，可以：
 - **样式**: SCSS + Tailwind CSS
 - **MinIO SDK**: AWS SDK for JavaScript v3
 - **加密**: crypto-js
+
+## 快速开始
+
+### 前置条件
+
+在使用 MinIO View 之前，请确保：
+
+1. 已安装并运行 MinIO 服务器
+2. 拥有 MinIO 的 Access Key 和 Secret Key
+3. 已创建至少一个存储桶（Bucket）
+
+### 快速体验
+
+```bash
+# 克隆项目
+git clone https://github.com/your-username/minio-view.git
+cd minio-view
+
+# 安装依赖
+pnpm install
+
+# 启动开发服务器
+pnpm dev
+```
+
+访问 `http://localhost:5174`，在设置页面填入你的 MinIO 配置即可开始使用。
 
 ## 安装和运行
 
@@ -201,7 +245,7 @@ npm run build
 - 所有凭证使用 AES 加密后存储在浏览器 `localStorage` 中
 - 凭证不会上传到任何服务器
 - 建议定期更换密钥
-- 不建议在公共电脑上使用
+- 不建议在公共电脑上使用，使用完毕后可在设置页面清除配置
 
 ## 文件存储结构
 
@@ -262,6 +306,96 @@ bucket-name/
 - 在新设备的浏览器中重新配置 MinIO 连接信息
 - 所有文件都存储在 MinIO 服务器上，不会丢失
 
+## 部署指南
+
+### 静态网站部署
+
+MinIO View 是纯前端应用，可以部署到任何静态网站托管服务。
+
+#### 构建应用
+
+```bash
+pnpm build
+```
+
+构建产物在 `dist` 目录下，包含所有静态文件。
+
+#### 部署选项
+
+**1. Nginx 部署**
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    root /path/to/minio-view/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 启用 gzip 压缩
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+}
+```
+
+**2. Apache 部署**
+
+在 `dist` 目录创建 `.htaccess` 文件：
+
+```apache
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+```
+
+**3. Docker 部署**
+
+创建 `Dockerfile`：
+
+```dockerfile
+FROM nginx:alpine
+COPY dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+构建并运行：
+
+```bash
+docker build -t minio-view .
+docker run -d -p 8080:80 minio-view
+```
+
+**4. 其他平台**
+
+- **Vercel**: 导入 Git 仓库，自动检测 Vite 项目并部署
+- **Netlify**: 拖拽 `dist` 目录或连接 Git 仓库
+- **GitHub Pages**: 使用 GitHub Actions 自动构建部署
+- **云服务器**: 上传 `dist` 目录到服务器，配置 Web 服务器
+
+### 环境变量配置
+
+由于是纯前端应用，所有配置在浏览器端完成，无需环境变量。
+
+### CORS 注意事项
+
+如果遇到跨域问题，需要在 MinIO 服务器上配置 CORS：
+
+```bash
+mc cors set minio/your-bucket --allow-origin="https://your-domain.com"
+```
+
+或在 MinIO 控制台的 Bucket 设置中配置允许的源。
+
 ## 开发
 
 ### 项目结构
@@ -271,40 +405,110 @@ minio-view/
 ├── src/
 │   ├── assets/          # 静态资源
 │   ├── layouts/         # 布局组件
-│   │   └── components/  # Header 等组件
-│   ├── router/          # 路由配置
+│   │   └── components/  # Header 等公共组件
+│   ├── router/          # Vue Router 路由配置
 │   ├── services/        # MinIO 服务封装
 │   ├── store/           # Pinia 状态管理
-│   ├── utils/           # 工具函数（加密等）
+│   ├── utils/           # 工具函数（加密、格式化等）
 │   ├── views/           # 页面组件
-│   │   ├── Gallery.vue  # 图库页面
+│   │   ├── Gallery.vue  # 图库页面（主要功能）
 │   │   └── Settings.vue # 设置页面
-│   ├── App.vue
-│   └── main.ts
-├── public/
-├── package.json
-├── vite.config.ts
-└── tsconfig.json
+│   ├── App.vue          # 根组件
+│   └── main.ts          # 应用入口
+├── public/              # 公共静态资源
+├── package.json         # 项目依赖配置
+├── vite.config.ts       # Vite 构建配置
+├── tsconfig.json        # TypeScript 配置
+└── tailwind.config.js   # Tailwind CSS 配置
 ```
+
+### 核心模块说明
+
+**MinIO 服务 (`src/services/minio.ts`)**
+- 封装 MinIO 客户端操作
+- 提供文件上传、下载、删除等方法
+- 处理预签名 URL 生成
+
+**配置管理 (`src/store/config.ts`)**
+- 使用 Pinia 管理 MinIO 配置
+- AES 加密/解密凭证
+- 持久化到 localStorage
+
+**文件管理 (`src/views/Gallery.vue`)**
+- 文件列表获取和展示
+- 批量选择和操作
+- 时间线分组逻辑
 
 ### 开发建议
 
+**代码规范**
 - 使用 TypeScript 确保类型安全
 - 遵循 Vue 3 Composition API 最佳实践
-- 使用 SCSS 编写组件样式
-- 保持代码格式一致
+- 组件样式使用 SCSS Scoped
+- 优先使用 Tailwind CSS 工具类
 
-## 许可证
+**性能优化**
+- 图片懒加载使用预签名 URL
+- 大列表使用虚拟滚动（可扩展）
+- 合理使用 Vue 的响应式特性
 
-MIT License
+**调试技巧**
+```bash
+# 启动开发服务器（带热更新）
+pnpm dev
 
-## 贡献
+# 类型检查
+pnpm type-check
+
+# 构建预览
+pnpm build && pnpm preview
+```
+
+### 技术亮点
+
+1. **安全性**: 客户端 AES 加密存储凭证
+2. **用户体验**: 响应式设计，拖拽上传，批量操作
+3. **性能**: Vite 构建，按需加载，预签名 URL
+4. **架构**: 纯前端应用，无后端依赖，易于部署
+
+## 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
 
-## 作者
+**贡献流程**
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
 
-Created with ❤️ for MinIO users
+**开发规范**
+- 保持代码风格一致
+- 添加必要的注释
+- 确保类型安全
+- 测试新功能
+
+## 路线图
+
+- [ ] 添加视频/音频预览播放器
+- [ ] 支持文件重命名和移动
+- [ ] 添加文件搜索和筛选功能
+- [ ] 支持多桶同时管理
+- [ ] 添加统计面板（存储空间、文件数量等）
+- [ ] 支持分享文件（生成临时链接）
+- [ ] 支持文件夹结构展示
+- [ ] 移动端优化
+
+## 许可证
+
+MIT License - 详见 [LICENSE](LICENSE) 文件
+
+## 联系方式
+
+如有问题或建议，欢迎通过以下方式联系：
+
+- 提交 [Issue](https://github.com/your-username/minio-view/issues)
+- 发起 [Pull Request](https://github.com/your-username/minio-view/pulls)
 
 ## 致谢
 

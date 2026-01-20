@@ -1,10 +1,10 @@
 <template>
-  <div class="h-full px-[10px] flex items-center justify-between w-full">
-    <div class="flex items-center">
+  <div class="h-full px-[20px] flex items-center justify-between w-full">
+    <div class="flex items-center select-none">
       <img class="mr-3" src="@/assets/ice.svg" width="30" alt="MinIO View"/>
-      <span class="text-lg font-semibold text-gray-800">MinIO 图库</span>
+      <span class="text-xl  font-bold  text-gray-800">MINIO Kanban</span>
     </div>
-    <el-menu router class="border-none" :default-active="activeIndex" mode="horizontal" @select="handleSelect">
+    <el-menu router class="felx border-none flex-1 justify-end" :default-active="activeIndex" mode="horizontal" @select="handleSelect">
       <el-menu-item index="/gallery">
         <el-icon><Picture /></el-icon>
         <span>图库</span>

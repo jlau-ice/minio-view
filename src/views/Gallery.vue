@@ -1,52 +1,80 @@
 <template>
-  <div class="gallery-container">
-    <div class="header-section">
-      <div class="header-content">
-        <h1 class="page-title">图库</h1>
-        <div class="header-actions">
-          <el-select v-model="selectedBucket" placeholder="请选择桶" @change="handleBucketChange" :loading="loading" size="large" class="bucket-select">
-            <el-option v-for="bucket in buckets" :key="bucket.name" :label="bucket.name" :value="bucket.name" />
+  <div class="gallery-page">
+    <!-- 顶部操作栏 -->
+    <div class="page-header">
+      <div class="header-top">
+        <div class="title-section">
+          <h1 class="page-title">图库</h1>
+          <div class="stats">
+            <span class="stat">{{ files.length }} 个文件</span>
+            <span class="stat-divider"></span>
+            <span class="stat">{{ files.filter((f) => f.isImage).length }} 张图片</span>
+            <template v-if="selectionMode">
+              <span class="stat-divider"></span>
+              <span class="stat highlight">已选 {{ selectedCount }}</span>
+            </template>
+          </div>
+        </div>
+        <div class="actions">
+          <el-select
+            v-model="selectedBucket"
+            placeholder="选择存储桶"
+            @change="handleBucketChange"
+            :loading="loading"
+            class="bucket-select"
+          >
+            <el-option
+              v-for="bucket in buckets"
+              :key="bucket.name"
+              :label="bucket.name"
+              :value="bucket.name"
+            />
           </el-select>
-          <el-button v-if="!selectionMode" type="primary" :icon="Upload" @click="openUploadDialog" size="large"> 上传文件 </el-button>
-          <el-button v-if="!selectionMode" :icon="Select" @click="toggleSelectionMode" size="large"> 批量选择 </el-button>
+
+          <template v-if="!selectionMode">
+            <el-button type="primary" @click="openUploadDialog">
+              <el-icon class="mr-1"><Upload /></el-icon>
+              上传
+            </el-button>
+            <el-button @click="toggleSelectionMode">
+              <el-icon class="mr-1"><Select /></el-icon>
+              选择
+            </el-button>
+            <el-button @click="loadFiles" :loading="loadingFiles" :icon="loadingFiles ? undefined : Refresh" circle />
+          </template>
+
           <template v-if="selectionMode">
-            <el-button type="primary" @click="toggleSelectAll" size="large">
+            <el-button type="primary" @click="toggleSelectAll">
               {{ isAllSelected ? '取消全选' : '全选' }}
             </el-button>
-            <el-button type="danger" :icon="Delete" @click="handleBatchDelete" size="large" :disabled="selectedCount === 0"> 删除选中 ({{ selectedCount }}) </el-button>
-            <el-button :icon="CloseBold" @click="toggleSelectionMode" size="large"> 取消 </el-button>
+            <el-button type="danger" @click="handleBatchDelete" :disabled="selectedCount === 0">
+              <el-icon class="mr-1"><Delete /></el-icon>
+              删除 ({{ selectedCount }})
+            </el-button>
+            <el-button @click="toggleSelectionMode">取消</el-button>
           </template>
-          <el-button v-if="!selectionMode" :icon="Refresh" @click="loadFiles" :loading="loadingFiles" size="large"> 刷新 </el-button>
         </div>
-      </div>
-      <div class="stats-bar">
-        <span class="stat-item">
-          <span class="stat-label">总文件数：</span>
-          <span class="stat-value">{{ files.length }}</span>
-        </span>
-        <span class="stat-item">
-          <span class="stat-label">图片：</span>
-          <span class="stat-value">{{ files.filter((f) => f.isImage).length }}</span>
-        </span>
-        <span v-if="selectionMode" class="stat-item">
-          <span class="stat-label">已选中：</span>
-          <span class="stat-value selection">{{ selectedCount }}</span>
-        </span>
       </div>
     </div>
 
-    <div v-loading="loadingFiles" class="timeline-container">
+    <!-- 文件列表 -->
+    <div v-loading="loadingFiles" class="content-area">
       <div v-if="groupedFiles.length === 0" class="empty-state">
-        <el-empty description="暂无文件">
-          <el-button type="primary" @click="openUploadDialog" :icon="Plus"> 上传第一个文件 </el-button>
-        </el-empty>
+        <div class="empty-content">
+          <el-icon :size="64" color="#d4d4d8"><Picture /></el-icon>
+          <p class="empty-text">暂无文件</p>
+          <el-button type="primary" @click="openUploadDialog">
+            <el-icon class="mr-1"><Plus /></el-icon>
+            上传第一个文件
+          </el-button>
+        </div>
       </div>
 
-      <div v-else class="timeline">
-        <div v-for="group in groupedFiles" :key="group.date" class="timeline-group">
-          <div class="timeline-date">
-            <span class="date-text">{{ group.date }}</span>
-            <span class="date-count">{{ group.files.length }} 个文件</span>
+      <div v-else class="file-groups">
+        <div v-for="group in groupedFiles" :key="group.date" class="file-group">
+          <div class="group-header">
+            <span class="group-date">{{ group.date }}</span>
+            <span class="group-count">{{ group.files.length }}</span>
           </div>
           <div class="files-grid">
             <div
@@ -54,70 +82,69 @@
               :key="file.name"
               class="file-card"
               :class="{
-                'selection-mode': selectionMode,
-                selected: selectedFiles.has(file.name),
+                'is-selecting': selectionMode,
+                'is-selected': selectedFiles.has(file.name),
               }"
-              @click="handleCardClick(file)">
+              @click="handleCardClick(file)"
+            >
               <!-- 选择指示器 -->
-              <div v-if="selectionMode" class="selection-indicator" :class="{ selected: selectedFiles.has(file.name) }" @click.stop="toggleFileSelection(file.name)">
-                <transition name="check-fade">
-                  <el-icon v-if="selectedFiles.has(file.name)" :size="18">
-                    <SuccessFilled />
-                  </el-icon>
-                </transition>
+              <div
+                v-if="selectionMode"
+                class="select-checkbox"
+                :class="{ checked: selectedFiles.has(file.name) }"
+                @click.stop="toggleFileSelection(file.name)"
+              >
+                <el-icon v-if="selectedFiles.has(file.name)" :size="14">
+                  <Check />
+                </el-icon>
               </div>
-              <div class="file-preview">
-                <div v-if="file.isImage" class="image-preview">
-                  <img v-if="file.thumbnailUrl" :src="file.thumbnailUrl" :alt="file.name" class="thumbnail-image" />
-                  <div v-else class="loading-placeholder">
-                    <el-icon class="is-loading">
-                      <Picture />
-                    </el-icon>
+
+              <!-- 预览区 -->
+              <div class="preview-area">
+                <template v-if="file.isImage">
+                  <img
+                    v-if="file.thumbnailUrl"
+                    :src="file.thumbnailUrl"
+                    :alt="file.name"
+                    class="thumbnail"
+                  />
+                  <div v-else class="loading-thumb">
+                    <el-icon class="is-loading" :size="24"><Picture /></el-icon>
                   </div>
-                  <div v-if="!selectionMode" class="preview-overlay">
-                    <el-icon :size="32">
-                      <ZoomIn />
-                    </el-icon>
-                  </div>
-                </div>
-                <div v-else class="icon-preview">
-                  <el-icon :size="48" class="file-type-icon">
+                </template>
+                <div v-else class="file-type-icon">
+                  <el-icon :size="36" color="#a1a1aa">
                     <component :is="getFileIcon(file.fileType)" />
                   </el-icon>
-                  <div class="file-ext">{{ file.name.split('.').pop()?.toUpperCase() }}</div>
+                  <span class="file-ext">{{ file.name.split('.').pop()?.toUpperCase() }}</span>
+                </div>
+
+                <!-- 悬停操作 -->
+                <div v-if="!selectionMode" class="hover-actions">
+                  <button class="action-btn" @click.stop="handlePreview(file)" title="预览">
+                    <el-icon :size="18"><ZoomIn /></el-icon>
+                  </button>
+                  <button class="action-btn" @click.stop="handleDownload(file)" title="下载">
+                    <el-icon :size="18"><Download /></el-icon>
+                  </button>
+                  <button class="action-btn danger" @click.stop="handleDelete(file)" title="删除">
+                    <el-icon :size="18"><Delete /></el-icon>
+                  </button>
                 </div>
               </div>
 
-              <div class="file-info">
-                <div class="file-name" :title="file.name">
-                  {{ file.name }}
+              <!-- 文件信息 -->
+              <div class="file-meta">
+                <span class="file-name" :title="file.name">{{ file.name }}</span>
+                <div class="file-details">
+                  <span>{{ formatFileSize(file.size) }}</span>
+                  <span>{{
+                    new Date(file.lastModified).toLocaleTimeString('zh-CN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  }}</span>
                 </div>
-                <div class="file-meta">
-                  <span class="meta-item">
-                    <el-icon><Document /></el-icon>
-                    {{ formatFileSize(file.size) }}
-                  </span>
-                  <span class="meta-item">
-                    {{
-                      new Date(file.lastModified).toLocaleTimeString('zh-CN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    }}
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="!selectionMode" class="file-actions">
-                <el-tooltip content="预览" placement="top">
-                  <el-button type="primary" size="small" :icon="ZoomIn" @click.stop="handlePreview(file)" circle />
-                </el-tooltip>
-                <el-tooltip content="下载" placement="top">
-                  <el-button type="success" size="small" :icon="Download" @click.stop="handleDownload(file)" circle />
-                </el-tooltip>
-                <el-tooltip content="删除" placement="top">
-                  <el-button type="danger" size="small" :icon="Delete" @click.stop="handleDelete(file)" circle />
-                </el-tooltip>
               </div>
             </div>
           </div>
@@ -126,88 +153,96 @@
     </div>
 
     <!-- 全屏预览 -->
-    <transition name="preview-fade">
-      <div v-if="previewVisible" class="preview-overlay" @click="closePreview">
-        <!-- 关闭按钮 -->
-        <div class="preview-close" @click="closePreview">
-          <el-icon :size="28">
-            <Close />
-          </el-icon>
-        </div>
+    <Teleport to="body">
+      <transition name="preview-fade">
+        <div v-if="previewVisible" class="preview-modal" @click="closePreview">
+          <button class="preview-close" @click="closePreview">
+            <el-icon :size="24"><Close /></el-icon>
+          </button>
 
-        <!-- 左箭头 -->
-        <transition name="arrow-fade">
-          <div v-if="hasPrevImage && previewFileType === 'image'" class="preview-arrow preview-arrow-left" @click.stop="showPrevImage">
-            <el-icon :size="40">
-              <ArrowLeft />
-            </el-icon>
-          </div>
-        </transition>
+          <button
+            v-if="hasPrevImage && previewFileType === 'image'"
+            class="preview-nav prev"
+            @click.stop="showPrevImage"
+          >
+            <el-icon :size="28"><ArrowLeft /></el-icon>
+          </button>
 
-        <!-- 右箭头 -->
-        <transition name="arrow-fade">
-          <div v-if="hasNextImage && previewFileType === 'image'" class="preview-arrow preview-arrow-right" @click.stop="showNextImage">
-            <el-icon :size="40">
-              <ArrowRight />
-            </el-icon>
-          </div>
-        </transition>
+          <button
+            v-if="hasNextImage && previewFileType === 'image'"
+            class="preview-nav next"
+            @click.stop="showNextImage"
+          >
+            <el-icon :size="28"><ArrowRight /></el-icon>
+          </button>
 
-        <!-- 内容区域 -->
-        <div class="preview-container" @click.stop>
-          <div v-if="previewFileType === 'image'" class="preview-image-wrapper">
-            <img
-              :src="previewUrl"
-              :alt="previewFileName"
-              class="preview-image"
-              :style="{ transform: imageTransform, cursor: imageScale > 1 ? 'move' : 'default' }"
-              @mousedown="handleMouseDown"
-              draggable="false" />
-          </div>
-          <div v-else class="preview-file-wrapper">
-            <el-icon :size="100" class="file-icon">
-              <component :is="getFileIcon(previewFileType)" />
-            </el-icon>
-            <el-button type="primary" size="large" class="mt-6" @click="handleOpen">在新窗口打开</el-button>
-            <!-- <el-button type="primary" size="large" class="mt-6" @click="window.open(previewUrl, '_blank')"> 在新窗口打开 </el-button> -->
-          </div>
-
-          <!-- 文件名和缩放提示 -->
-          <div class="preview-footer">
-            <div class="preview-filename">
-              {{ previewFileName }}
+          <div class="preview-content" @click.stop>
+            <template v-if="previewFileType === 'image'">
+              <img
+                :src="previewUrl"
+                :alt="previewFileName"
+                class="preview-img"
+                :style="{ transform: imageTransform, cursor: imageScale > 1 ? 'grab' : 'default' }"
+                @mousedown="handleMouseDown"
+                draggable="false"
+              />
+            </template>
+            <div v-else class="preview-file">
+              <el-icon :size="80" color="rgba(255,255,255,0.6)">
+                <component :is="getFileIcon(previewFileType)" />
+              </el-icon>
+              <el-button type="primary" size="large" @click="handleOpen">在新窗口打开</el-button>
             </div>
-            <div v-if="previewFileType === 'image' && imageScale !== 1" class="preview-scale-info">{{ Math.round(imageScale * 100) }}%</div>
+          </div>
+
+          <div class="preview-info">
+            <span class="preview-name">{{ previewFileName }}</span>
+            <span v-if="previewFileType === 'image' && imageScale !== 1" class="preview-zoom">
+              {{ Math.round(imageScale * 100) }}%
+            </span>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </Teleport>
+
     <!-- 上传对话框 -->
-    <el-dialog v-model="uploadDialogVisible" title="上传文件" width="600px" :close-on-click-modal="false">
-      <div class="upload-container">
-        <el-alert title="文件存储规则" type="info" :closable="false" class="mb-4">
-          文件将按照 <strong>年/月/日/时间戳_文件名</strong> 的格式存储<br />
-          例如：2026/01/17/1737202800000_image.jpg
-        </el-alert>
-        <el-upload v-model:file-list="uploadFileList" drag multiple :auto-upload="false" :on-change="handleUploadChange" :on-remove="handleUploadRemove">
-          <el-icon class="el-icon--upload"><Upload /></el-icon>
-          <div class="el-upload__text">将文件拖到此处，或<em>点击选择</em></div>
-          <template #tip>
-            <div class="el-upload__tip">支持任意类型的文件</div>
-          </template>
+    <el-dialog
+      v-model="uploadDialogVisible"
+      title="上传文件"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <div class="upload-area">
+        <el-upload
+          v-model:file-list="uploadFileList"
+          drag
+          multiple
+          :auto-upload="false"
+          :on-change="handleUploadChange"
+          :on-remove="handleUploadRemove"
+        >
+          <div class="upload-dragger">
+            <el-icon :size="40" color="#a1a1aa"><Upload /></el-icon>
+            <p class="upload-text">拖拽文件到此处，或 <em>点击选择</em></p>
+            <p class="upload-hint">文件将按 年/月/日/时间戳_文件名 格式存储</p>
+          </div>
         </el-upload>
       </div>
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="uploadDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleUpload" :loading="uploading" :disabled="uploadFileList.length === 0">
-            {{ uploading ? '上传中...' : '开始上传' }}
-          </el-button>
-        </span>
+        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          @click="handleUpload"
+          :loading="uploading"
+          :disabled="uploadFileList.length === 0"
+        >
+          {{ uploading ? '上传中...' : '开始上传' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -225,14 +260,21 @@ import {
   Refresh,
   Plus,
   Select,
-  CloseBold,
-  SuccessFilled,
+  Check,
   ArrowLeft,
   ArrowRight,
   Close,
 } from '@element-plus/icons-vue'
 import type { BucketInfo, FileObject } from '@/services/minio'
-import { listBuckets, listObjects, getPresignedUrl, removeObject, initMinioClient, uploadFile, batchRemoveObjects } from '@/services/minio'
+import {
+  listBuckets,
+  listObjects,
+  getPresignedUrl,
+  removeObject,
+  initMinioClient,
+  uploadFile,
+  batchRemoveObjects,
+} from '@/services/minio'
 import { getMinioConfig, hasMinioConfig } from '@/utils/storage'
 import type { UploadProps, UploadUserFile } from 'element-plus'
 
@@ -258,26 +300,13 @@ const uploadDialogVisible = ref(false)
 const uploadFileList = ref<UploadUserFile[]>([])
 const uploading = ref(false)
 
-// 批量选择相关
 const selectionMode = ref(false)
 const selectedFiles = ref<Set<string>>(new Set())
 
-// 预览相关计算属性
-// const currentPreviewFile = computed(() => {
-//   if (!previewVisible.value || files.value.length === 0) return null
-//   return files.value[currentPreviewIndex.value]
-// })
-
-const hasNextImage = computed(() => {
-  return currentPreviewIndex.value < files.value.length - 1
-})
-
-const hasPrevImage = computed(() => {
-  return currentPreviewIndex.value > 0
-})
+const hasNextImage = computed(() => currentPreviewIndex.value < files.value.length - 1)
+const hasPrevImage = computed(() => currentPreviewIndex.value > 0)
 
 const imageTransform = computed(() => {
-  // Apply translate before scale to avoid coordinate space issues
   return `translate(${imageTranslate.value.x}px, ${imageTranslate.value.y}px) scale(${imageScale.value})`
 })
 
@@ -298,9 +327,9 @@ interface FileWithUrl extends FileObject {
 
 const handleOpen = () => {
   if (previewUrl.value) {
-    window.open(previewUrl.value, '_blank', 'noopener,noreferrer');
+    window.open(previewUrl.value, '_blank', 'noopener,noreferrer')
   }
-};
+}
 
 const groupedFiles = computed<GroupedFiles[]>(() => {
   const groups: Record<string, FileWithUrl[]> = {}
@@ -357,7 +386,7 @@ const formatFileSize = (bytes: number): string => {
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
 
 const loadBuckets = async () => {
@@ -421,7 +450,6 @@ const handlePreview = async (file: FileObject) => {
   if (selectionMode.value) return
 
   try {
-    // 找到当前文件在列表中的索引
     const index = files.value.findIndex((f) => f.name === file.name)
     if (index !== -1) {
       currentPreviewIndex.value = index
@@ -433,7 +461,6 @@ const handlePreview = async (file: FileObject) => {
     previewFileType.value = file.fileType
     previewVisible.value = true
 
-    // 禁止页面滚动
     document.body.style.overflow = 'hidden'
   } catch (error) {
     ElMessage.error('获取预览链接失败：' + (error as Error).message)
@@ -447,7 +474,6 @@ const closePreview = () => {
   previewFileType.value = ''
   resetImageTransform()
 
-  // 恢复页面滚动
   document.body.style.overflow = ''
 }
 
@@ -489,11 +515,9 @@ const showPrevImage = async () => {
   }
 }
 
-// 处理滚轮缩放
 const handleWheel = (event: WheelEvent) => {
   if (!previewVisible.value || previewFileType.value !== 'image') return
 
-  // 检查是否按下 Ctrl 键
   if (event.ctrlKey || event.metaKey) {
     event.preventDefault()
 
@@ -503,7 +527,6 @@ const handleWheel = (event: WheelEvent) => {
   }
 }
 
-// 处理鼠标按下（开始拖拽）
 const handleMouseDown = (event: MouseEvent) => {
   if (imageScale.value <= 1) return
 
@@ -514,14 +537,12 @@ const handleMouseDown = (event: MouseEvent) => {
   }
 }
 
-// 处理鼠标移动（拖拽中）
 const handleMouseMove = (event: MouseEvent) => {
   if (!isDragging.value) return
 
   const newX = event.clientX - dragStart.value.x
   const newY = event.clientY - dragStart.value.y
 
-  // 添加边界限制，防止图片飞太远（限制在屏幕的2倍范围内）
   const maxOffset = Math.max(window.innerWidth, window.innerHeight) * 1.5
 
   imageTranslate.value = {
@@ -530,7 +551,6 @@ const handleMouseMove = (event: MouseEvent) => {
   }
 }
 
-// 处理鼠标松开（结束拖拽）
 const handleMouseUp = () => {
   isDragging.value = false
 }
@@ -560,22 +580,17 @@ onMounted(async () => {
     await loadBuckets()
   }
 
-  // 添加键盘事件监听
   window.addEventListener('keydown', handlePreviewKeydown)
-  // 添加滚轮事件监听（用于图片缩放）
   window.addEventListener('wheel', handleWheel, { passive: false })
-  // 添加鼠标事件监听（用于图片拖拽）
   window.addEventListener('mousemove', handleMouseMove)
   window.addEventListener('mouseup', handleMouseUp)
 })
-
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handlePreviewKeydown)
   window.removeEventListener('wheel', handleWheel)
   window.removeEventListener('mousemove', handleMouseMove)
   window.removeEventListener('mouseup', handleMouseUp)
-  // 确保恢复页面滚动
   document.body.style.overflow = ''
 })
 
@@ -593,8 +608,8 @@ const handleDownload = async (file: FileObject) => {
 
 const handleDelete = async (file: FileObject) => {
   try {
-    await ElMessageBox.confirm(`确定要删除文件 "${file.name}" 吗？此操作不可恢复！`, '删除确认', {
-      confirmButtonText: '确定',
+    await ElMessageBox.confirm(`确定要删除文件 "${file.name}" 吗？`, '删除确认', {
+      confirmButtonText: '删除',
       cancelButtonText: '取消',
       type: 'warning',
     })
@@ -618,13 +633,11 @@ const openUploadDialog = () => {
   uploadFileList.value = []
 }
 
-const handleUploadChange: UploadProps['onChange'] = (uploadFile, uploadFiles) => {
-  console.log('handleUploadChange', uploadFile, uploadFiles)
+const handleUploadChange: UploadProps['onChange'] = (_uploadFile, uploadFiles) => {
   uploadFileList.value = uploadFiles
 }
 
-const handleUploadRemove: UploadProps['onRemove'] = (uploadFile, uploadFiles) => {
-  console.log('handleUploadChange', uploadFile, uploadFiles)
+const handleUploadRemove: UploadProps['onRemove'] = (_uploadFile, uploadFiles) => {
   uploadFileList.value = uploadFiles
 }
 
@@ -652,7 +665,6 @@ const handleUpload = async () => {
   }
 }
 
-// 批量选择相关方法
 const toggleSelectionMode = () => {
   selectionMode.value = !selectionMode.value
   if (!selectionMode.value) {
@@ -685,11 +697,15 @@ const handleBatchDelete = async () => {
   }
 
   try {
-    await ElMessageBox.confirm(`确定要删除选中的 ${selectedFiles.value.size} 个文件吗？此操作不可恢复！`, '批量删除确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedFiles.value.size} 个文件吗？`,
+      '批量删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
 
     const fileNames = Array.from(selectedFiles.value)
     await batchRemoveObjects(selectedBucket.value, fileNames)
@@ -712,71 +728,79 @@ const handleCardClick = (file: FileObject) => {
 </script>
 
 <style scoped lang="scss">
-.gallery-container {
-  max-width: 1400px;
+.gallery-page {
+  min-height: 100%;
+  padding: 24px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding: 20px;
 }
 
-.header-section {
-  margin-bottom: 30px;
+// 头部
+.page-header {
+  margin-bottom: 32px;
+}
 
-  .header-content {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
 
-    .page-title {
-      font-size: 28px;
-      font-weight: 600;
-      color: #303133;
-      margin: 0;
-    }
+.title-section {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
 
-    .header-actions {
-      display: flex;
-      gap: 12px;
-      align-items: center;
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #18181b;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
 
-      .bucket-select {
-        width: 220px;
-      }
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .stat {
+    font-size: 14px;
+    color: #71717a;
+
+    &.highlight {
+      color: #0ea5e9;
+      font-weight: 500;
     }
   }
 
-  .stats-bar {
-    display: flex;
-    gap: 30px;
-    padding: 15px 20px;
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-
-      .stat-label {
-        color: #909399;
-        font-size: 14px;
-      }
-
-      .stat-value {
-        color: #409eff;
-        font-size: 18px;
-        font-weight: 600;
-
-        &.selection {
-          color: #67c23a;
-        }
-      }
-    }
+  .stat-divider {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background-color: #d4d4d8;
   }
 }
 
-.timeline-container {
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .bucket-select {
+    width: 180px;
+  }
+
+  .mr-1 {
+    margin-right: 4px;
+  }
+}
+
+// 内容区
+.content-area {
   min-height: 400px;
 }
 
@@ -786,258 +810,222 @@ const handleCardClick = (file: FileObject) => {
   align-items: center;
   min-height: 400px;
   background: white;
-  border-radius: 12px;
+  border-radius: 16px;
+  border: 1px solid #e4e4e7;
 }
 
-.timeline {
-  .timeline-group {
-    margin-bottom: 50px;
+.empty-content {
+  text-align: center;
 
-    .timeline-date {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 20px;
-      font-weight: 600;
-      color: #303133;
-      margin-bottom: 24px;
-      padding: 12px 20px;
-      background: linear-gradient(90deg, #409eff 0%, transparent 100%);
-      border-radius: 8px;
-
-      .date-text {
-        color: white;
-      }
-
-      .date-count {
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 400;
-      }
-    }
-
-    .files-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-      gap: 24px;
-    }
+  .empty-text {
+    margin: 16px 0 24px;
+    font-size: 15px;
+    color: #71717a;
   }
 }
 
+// 文件分组
+.file-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.file-group {
+  .group-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e4e4e7;
+  }
+
+  .group-date {
+    font-size: 15px;
+    font-weight: 600;
+    color: #18181b;
+  }
+
+  .group-count {
+    font-size: 12px;
+    color: #71717a;
+    background-color: #f4f4f5;
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+// 文件卡片
 .file-card {
   background: white;
   border-radius: 12px;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e4e4e7;
+  transition: all 0.2s ease;
+  cursor: pointer;
   position: relative;
 
-  &.selection-mode {
-    cursor: pointer;
-  }
-
-  &.selected {
-    box-shadow: 0 0 0 3px #67c23a;
-    transform: translateY(-2px);
-  }
-
   &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    border-color: #d4d4d8;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 
-    &.selected {
-      box-shadow:
-        0 0 0 3px #67c23a,
-        0 8px 24px rgba(0, 0, 0, 0.15);
-    }
-
-    .file-actions {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .preview-overlay {
+    .hover-actions {
       opacity: 1;
     }
   }
 
-  .selection-indicator {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    z-index: 10;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    background: rgba(255, 255, 255, 0.95);
-    border: 2px solid #dcdfe6;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-    backdrop-filter: blur(4px);
-
+  &.is-selecting {
     &:hover {
-      transform: scale(1.15);
-      border-color: #67c23a;
-      box-shadow: 0 4px 16px rgba(103, 194, 58, 0.3);
-    }
-
-    &.selected {
-      background: linear-gradient(135deg, #67c23a 0%, #85ce61 100%);
-      border-color: #67c23a;
-      color: white;
-      box-shadow: 0 4px 16px rgba(103, 194, 58, 0.4);
-
-      &:hover {
-        transform: scale(1.15);
-        background: linear-gradient(135deg, #85ce61 0%, #95d475 100%);
-        box-shadow: 0 6px 20px rgba(103, 194, 58, 0.5);
-      }
+      border-color: #0ea5e9;
     }
   }
 
-  .check-fade-enter-active,
-  .check-fade-leave-active {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .check-fade-enter-from {
-    opacity: 0;
-    transform: scale(0);
-  }
-
-  .check-fade-leave-to {
-    opacity: 0;
-    transform: scale(0);
-  }
-
-  .file-preview {
-    width: 100%;
-    height: 180px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #f5f7fa;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-
-    .image-preview {
-      width: 100%;
-      height: 100%;
-      position: relative;
-
-      .thumbnail-image {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-      }
-
-      .loading-placeholder {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-
-        .el-icon {
-          font-size: 48px;
-          color: #c0c4cc;
-        }
-      }
-
-      .preview-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0;
-        transition: opacity 0.3s;
-        color: white;
-      }
-    }
-
-    .icon-preview {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-
-      .file-type-icon {
-        color: #909399;
-      }
-
-      .file-ext {
-        font-size: 12px;
-        color: #606266;
-        font-weight: 600;
-        padding: 4px 8px;
-        background: #e4e7ed;
-        border-radius: 4px;
-      }
-    }
-  }
-
-  .file-info {
-    padding: 16px;
-
-    .file-name {
-      font-size: 14px;
-      color: #303133;
-      margin-bottom: 10px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-weight: 500;
-    }
-
-    .file-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: #909399;
-
-      .meta-item {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-
-        .el-icon {
-          font-size: 12px;
-        }
-      }
-    }
-  }
-
-  .file-actions {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    padding: 0 16px 16px;
-    opacity: 0;
-    transform: translateY(-10px);
-    transition: all 0.3s;
+  &.is-selected {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
   }
 }
 
-// 全屏预览样式
-.preview-overlay {
+.select-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: white;
+  border: 2px solid #d4d4d8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+  &:hover {
+    border-color: #0ea5e9;
+  }
+
+  &.checked {
+    background: #0ea5e9;
+    border-color: #0ea5e9;
+    color: white;
+  }
+}
+
+.preview-area {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #f4f4f5;
+  overflow: hidden;
+
+  .thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .loading-thumb {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #a1a1aa;
+  }
+
+  .file-type-icon {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    .file-ext {
+      font-size: 11px;
+      font-weight: 600;
+      color: #71717a;
+      background: #e4e4e7;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  }
+}
+
+.hover-actions {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.action-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: white;
+  color: #18181b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: #f4f4f5;
+    transform: scale(1.05);
+  }
+
+  &.danger:hover {
+    background: #fef2f2;
+    color: #ef4444;
+  }
+}
+
+.file-meta {
+  padding: 12px;
+
+  .file-name {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: #18181b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+  }
+
+  .file-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #a1a1aa;
+  }
+}
+
+// 预览模态框
+.preview-modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.92);
-  backdrop-filter: blur(20px);
+  background: rgba(0, 0, 0, 0.95);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1046,181 +1034,174 @@ const handleCardClick = (file: FileObject) => {
 
 .preview-close {
   position: absolute;
-  top: 30px;
-  right: 30px;
-  width: 50px;
-  height: 50px;
+  top: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
+  border: none;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
+  color: white;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  color: white;
-  z-index: 10001;
+  transition: all 0.2s ease;
+  z-index: 10;
 
   &:hover {
     background: rgba(255, 255, 255, 0.2);
-    transform: rotate(90deg) scale(1.1);
   }
 }
 
-.preview-arrow {
+.preview-nav {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 60px;
-  height: 60px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
+  border: none;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
+  color: white;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  color: white;
-  z-index: 10001;
+  transition: all 0.2s ease;
+  z-index: 10;
 
   &:hover {
     background: rgba(255, 255, 255, 0.2);
-    transform: translateY(-50%) scale(1.15);
   }
 
-  &.preview-arrow-left {
-    left: 40px;
+  &.prev {
+    left: 20px;
   }
 
-  &.preview-arrow-right {
-    right: 40px;
+  &.next {
+    right: 20px;
   }
 }
 
-.preview-container {
+.preview-content {
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: default;
-  position: relative;
-}
-
-.preview-image-wrapper {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  overflow: visible;
-  padding: 40px;
-
-  .preview-image {
-    max-width: 90vw;
-    max-height: calc(90vh - 120px);
-    width: auto;
-    height: auto;
-    object-fit: contain;
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-    transition: transform 0.1s ease-out;
-    user-select: none;
-    transform-origin: center center;
-    position: relative;
-    z-index: 1;
-  }
-}
-
-.preview-file-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 30px;
   padding: 60px;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-
-  .file-icon {
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .mt-6 {
-    margin-top: 24px;
-  }
 }
 
-.preview-footer {
+.preview-img {
+  max-width: 90vw;
+  max-height: 85vh;
+  object-fit: contain;
+  border-radius: 4px;
+  transition: transform 0.1s ease-out;
+  user-select: none;
+}
+
+.preview-file {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
+  gap: 24px;
+}
+
+.preview-info {
   position: absolute;
-  bottom: 0;
+  bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
   z-index: 10;
 }
 
-.preview-filename {
-  padding: 12px 24px;
+.preview-name {
+  padding: 8px 16px;
   background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(8px);
   border-radius: 8px;
   color: white;
-  font-size: 14px;
-  max-width: 70vw;
+  font-size: 13px;
+  max-width: 60vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: center;
 }
 
-.preview-scale-info {
-  padding: 8px 16px;
-  background: rgba(64, 158, 255, 0.8);
-  backdrop-filter: blur(10px);
+.preview-zoom {
+  padding: 6px 12px;
+  background: rgba(14, 165, 233, 0.8);
   border-radius: 6px;
   color: white;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-// 预览淡入淡出动画
+// 动画
 .preview-fade-enter-active,
 .preview-fade-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity 0.25s ease;
 }
 
-.preview-fade-enter-from {
-  opacity: 0;
-}
-
+.preview-fade-enter-from,
 .preview-fade-leave-to {
   opacity: 0;
 }
 
-.arrow-fade-enter-active,
-.arrow-fade-leave-active {
-  transition: all 0.3s ease;
+// 上传区域
+.upload-area {
+  .upload-dragger {
+    padding: 40px 20px;
+    text-align: center;
+
+    .upload-text {
+      margin-top: 16px;
+      font-size: 14px;
+      color: #71717a;
+
+      em {
+        color: #0ea5e9;
+        font-style: normal;
+      }
+    }
+
+    .upload-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #a1a1aa;
+    }
+  }
 }
 
-.arrow-fade-enter-from,
-.arrow-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-50%) scale(0.8);
-}
+// 响应式
+@media (max-width: 768px) {
+  .gallery-page {
+    padding: 16px;
+  }
 
-.upload-container {
-  padding: 20px 0;
+  .header-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 
-  .mb-4 {
-    margin-bottom: 20px;
+  .actions {
+    width: 100%;
+    flex-wrap: wrap;
+
+    .bucket-select {
+      width: 100%;
+    }
+  }
+
+  .files-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
   }
 }
 </style>

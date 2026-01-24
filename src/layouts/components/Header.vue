@@ -1,21 +1,30 @@
 <template>
-  <div class="h-full px-[10px] flex items-center justify-between w-full">
-    <div class="flex items-center">
-      <img class="mr-3" src="@/assets/ice.svg" width="30" alt="MinIO View"/>
-      <span class="text-lg font-semibold text-gray-800">MinIO 图库</span>
+  <div class="header-wrapper">
+    <div class="header-left">
+      <img src="@/assets/ice.svg" width="28" height="28" alt="MinIO View" class="logo" />
+      <span class="brand-name">MinIO View</span>
     </div>
-    <el-menu router class="border-none" :default-active="activeIndex" mode="horizontal" @select="handleSelect">
-      <el-menu-item index="/gallery">
-        <el-icon><Picture /></el-icon>
+    <nav class="header-nav">
+      <router-link
+        to="/gallery"
+        class="nav-item"
+        :class="{ active: activeIndex === '/gallery' }"
+      >
+        <el-icon :size="18"><Picture /></el-icon>
         <span>图库</span>
-      </el-menu-item>
-      <el-menu-item index="/settings">
-        <el-icon><Setting /></el-icon>
+      </router-link>
+      <router-link
+        to="/settings"
+        class="nav-item"
+        :class="{ active: activeIndex === '/settings' }"
+      >
+        <el-icon :size="18"><Setting /></el-icon>
         <span>设置</span>
-      </el-menu-item>
-    </el-menu>
+      </router-link>
+    </nav>
   </div>
 </template>
+
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -27,11 +36,66 @@ const activeIndex = ref(route.path)
 watch(() => route.path, (newPath) => {
   activeIndex.value = newPath
 })
-
-const handleSelect = (key: string) => {
-  activeIndex.value = key
-}
 </script>
-<style lang="scss" scoped>
 
+<style lang="scss" scoped>
+.header-wrapper {
+  height: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .logo {
+    transition: transform 0.3s ease;
+
+    &:hover {
+      transform: rotate(10deg);
+    }
+  }
+
+  .brand-name {
+    font-size: 17px;
+    font-weight: 600;
+    color: #18181b;
+    letter-spacing: -0.02em;
+  }
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #71717a;
+  text-decoration: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: #18181b;
+    background-color: #f4f4f5;
+  }
+
+  &.active {
+    color: #18181b;
+    background-color: #f4f4f5;
+  }
+}
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div class="header-wrapper">
-    <div class="header-left">
+    <div class="header-left cursor-pointer">
       <img src="@/assets/ice.svg" width="28" height="28" alt="MinIO View" class="logo" />
       <span class="brand-name">MinIO View</span>
     </div>

@@ -40,7 +40,7 @@
               <el-icon class="mr-1"><Select /></el-icon>
               选择
             </el-button>
-            <el-button @click="loadFiles" :loading="loadingFiles" :icon="loadingFiles ? undefined : Refresh" circle />
+            <el-button @click="handleRefresh" :loading="loadingFiles" :icon="loadingFiles ? undefined : Refresh" circle />
           </template>
 
           <template v-if="selectionMode">
@@ -286,6 +286,9 @@ const files = ref<FileWithUrl[]>([])
 const loading = ref(false)
 const loadingFiles = ref(false)
 
+// 缓存：桶名 -> 文件列表（包含缩略图URL）
+const bucketCache = new Map<string, FileWithUrl[]>()
+
 const previewVisible = ref(false)
 const previewUrl = ref('')
 const previewFileName = ref('')
@@ -404,12 +407,20 @@ const loadBuckets = async () => {
   }
 }
 
-const loadFiles = async () => {
+const loadFiles = async (forceRefresh = false) => {
   if (!selectedBucket.value) return
 
-  loadingFiles.value = true
   selectedFiles.value.clear()
   selectionMode.value = false
+
+  // 检查缓存
+  const cached = bucketCache.get(selectedBucket.value)
+  if (!forceRefresh && cached) {
+    files.value = cached
+    return
+  }
+
+  loadingFiles.value = true
 
   try {
     const objectList = await listObjects(selectedBucket.value)
@@ -419,7 +430,9 @@ const loadFiles = async () => {
       loading: false,
     }))
 
-    loadThumbnails()
+    // 加载缩略图后更新缓存
+    await loadThumbnails()
+    bucketCache.set(selectedBucket.value, [...files.value])
   } catch (error) {
     ElMessage.error('加载文件列表失败：' + (error as Error).message)
   } finally {
@@ -444,6 +457,10 @@ const loadThumbnails = async () => {
 
 const handleBucketChange = async () => {
   await loadFiles()
+}
+
+const handleRefresh = async () => {
+  await loadFiles(true)
 }
 
 const handlePreview = async (file: FileObject) => {
@@ -616,7 +633,8 @@ const handleDelete = async (file: FileObject) => {
 
     await removeObject(selectedBucket.value, file.name)
     ElMessage.success('删除成功')
-    await loadFiles()
+    bucketCache.delete(selectedBucket.value) // 清除缓存
+    await loadFiles(true)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除失败：' + (error as Error).message)
@@ -657,7 +675,8 @@ const handleUpload = async () => {
     ElMessage.success('上传成功')
     uploadDialogVisible.value = false
     uploadFileList.value = []
-    await loadFiles()
+    bucketCache.delete(selectedBucket.value) // 清除缓存
+    await loadFiles(true)
   } catch (error) {
     ElMessage.error('上传失败：' + (error as Error).message)
   } finally {
@@ -710,7 +729,8 @@ const handleBatchDelete = async () => {
     const fileNames = Array.from(selectedFiles.value)
     await batchRemoveObjects(selectedBucket.value, fileNames)
     ElMessage.success('批量删除成功')
-    await loadFiles()
+    bucketCache.delete(selectedBucket.value) // 清除缓存
+    await loadFiles(true)
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('批量删除失败：' + (error as Error).message)

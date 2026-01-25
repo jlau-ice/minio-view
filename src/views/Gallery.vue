@@ -80,6 +80,7 @@
             <div
               v-for="file in group.files"
               :key="file.name"
+              :ref="(el) => setFileCardRef(el, file.name)"
               class="file-card"
               :class="{
                 'is-selecting': selectionMode,
@@ -107,9 +108,10 @@
                     :src="file.thumbnailUrl"
                     :alt="file.name"
                     class="thumbnail"
+                    loading="lazy"
                   />
                   <div v-else class="loading-thumb">
-                    <el-icon class="is-loading" :size="24"><Picture /></el-icon>
+                    <el-icon :size="24" color="#d4d4d8"><Picture /></el-icon>
                   </div>
                 </template>
                 <div v-else class="file-type-icon">
@@ -244,7 +246,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -288,6 +290,11 @@ const loadingFiles = ref(false)
 
 // 缓存：桶名 -> 文件列表（包含缩略图URL）
 const bucketCache = new Map<string, FileWithUrl[]>()
+
+// 缩略图懒加载相关
+const fileCardRefs = new Map<string, Element>()
+let thumbnailObserver: IntersectionObserver | null = null
+const loadingThumbnails = new Set<string>() // 防止重复加载
 
 const previewVisible = ref(false)
 const previewUrl = ref('')
@@ -417,6 +424,10 @@ const loadFiles = async (forceRefresh = false) => {
   const cached = bucketCache.get(selectedBucket.value)
   if (!forceRefresh && cached) {
     files.value = cached
+    // 缓存的数据也需要设置观察器（可能有未加载的缩略图）
+    nextTick(() => {
+      setupThumbnailObserver()
+    })
     return
   }
 
@@ -430,9 +441,12 @@ const loadFiles = async (forceRefresh = false) => {
       loading: false,
     }))
 
-    // 加载缩略图后更新缓存
-    await loadThumbnails()
+    // 更新缓存
     bucketCache.set(selectedBucket.value, [...files.value])
+    // 下一帧启动懒加载观察
+    nextTick(() => {
+      setupThumbnailObserver()
+    })
   } catch (error) {
     ElMessage.error('加载文件列表失败：' + (error as Error).message)
   } finally {
@@ -440,19 +454,72 @@ const loadFiles = async (forceRefresh = false) => {
   }
 }
 
-const loadThumbnails = async () => {
-  for (const file of files.value) {
-    if (file.isImage && !file.thumbnailUrl) {
-      file.loading = true
-      try {
-        file.thumbnailUrl = await getPresignedUrl(selectedBucket.value, file.name)
-      } catch (error) {
-        console.error(`加载缩略图失败 ${file.name}:`, error)
-      } finally {
-        file.loading = false
-      }
-    }
+// 设置文件卡片的 ref
+const setFileCardRef = (el: unknown, fileName: string) => {
+  if (el instanceof Element) {
+    fileCardRefs.set(fileName, el)
+  } else {
+    fileCardRefs.delete(fileName)
   }
+}
+
+// 加载单个缩略图
+const loadSingleThumbnail = async (fileName: string) => {
+  if (loadingThumbnails.has(fileName)) return
+
+  const file = files.value.find(f => f.name === fileName)
+  if (!file || !file.isImage || file.thumbnailUrl) return
+
+  loadingThumbnails.add(fileName)
+  file.loading = true
+
+  try {
+    file.thumbnailUrl = await getPresignedUrl(selectedBucket.value, fileName)
+    // 更新缓存
+    bucketCache.set(selectedBucket.value, [...files.value])
+  } catch (error) {
+    console.error(`加载缩略图失败 ${fileName}:`, error)
+  } finally {
+    file.loading = false
+    loadingThumbnails.delete(fileName)
+  }
+}
+
+// 设置 IntersectionObserver 懒加载
+const setupThumbnailObserver = () => {
+  // 清理旧的 observer
+  if (thumbnailObserver) {
+    thumbnailObserver.disconnect()
+  }
+
+  thumbnailObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const fileName = [...fileCardRefs.entries()]
+            .find(([_, el]) => el === entry.target)?.[0]
+
+          if (fileName) {
+            loadSingleThumbnail(fileName)
+            // 加载后取消观察
+            thumbnailObserver?.unobserve(entry.target)
+          }
+        }
+      })
+    },
+    {
+      rootMargin: '100px', // 提前 100px 开始加载
+      threshold: 0.1,
+    }
+  )
+
+  // 观察所有图片文件卡片
+  fileCardRefs.forEach((el, fileName) => {
+    const file = files.value.find(f => f.name === fileName)
+    if (file?.isImage && !file.thumbnailUrl) {
+      thumbnailObserver?.observe(el)
+    }
+  })
 }
 
 const handleBucketChange = async () => {
@@ -609,6 +676,14 @@ onUnmounted(() => {
   window.removeEventListener('mousemove', handleMouseMove)
   window.removeEventListener('mouseup', handleMouseUp)
   document.body.style.overflow = ''
+
+  // 清理 IntersectionObserver
+  if (thumbnailObserver) {
+    thumbnailObserver.disconnect()
+    thumbnailObserver = null
+  }
+  fileCardRefs.clear()
+  loadingThumbnails.clear()
 })
 
 const handleDownload = async (file: FileObject) => {

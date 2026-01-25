@@ -25,6 +25,7 @@
             <el-form-item label="端口" prop="port">
               <el-input-number
                 v-model="configForm.port"
+                :controls="false"
                 :min="1"
                 :max="65535"
                 controls-position="right"

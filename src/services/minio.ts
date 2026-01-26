@@ -7,7 +7,7 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import type { MinioConfig } from '@/utils/storage'
+import type { MinioConfigBase } from '@/utils/storage'
 
 export interface BucketInfo {
   name: string
@@ -28,7 +28,7 @@ let s3Client: S3Client | null = null
 /**
  * 初始化 S3 客户端
  */
-export function initMinioClient(config: MinioConfig): S3Client {
+export function initMinioClient(config: MinioConfigBase): S3Client {
   const endpoint = `${config.useSSL ? 'https' : 'http'}://${config.endpoint}:${config.port}`
 
   s3Client = new S3Client({
@@ -57,7 +57,7 @@ export function getMinioClient(): S3Client {
 /**
  * 测试连接
  */
-export async function testConnection(config: MinioConfig): Promise<boolean> {
+export async function testConnection(config: MinioConfigBase): Promise<boolean> {
   try {
     const endpoint = `${config.useSSL ? 'https' : 'http'}://${config.endpoint}:${config.port}`
 

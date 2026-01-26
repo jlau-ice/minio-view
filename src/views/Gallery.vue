@@ -125,14 +125,15 @@
 
                 <!-- 悬停操作 -->
                 <div v-if="!selectionMode" class="hover-actions">
-                  <button class="action-btn" @click.stop="handlePreview(file)" title="预览">
-                    <el-icon :size="18"><ZoomIn /></el-icon>
+                  <!-- <button class="action-btn" @click.stop="handlePreview(file)" title="复制地址"> -->
+                  <button class="action-btn" @click.stop="handleCopy(file)" title="复制地址">
+                    <el-icon :size="14"><DocumentCopy /></el-icon>
                   </button>
                   <button class="action-btn" @click.stop="handleDownload(file)" title="下载">
-                    <el-icon :size="18"><Download /></el-icon>
+                    <el-icon :size="14"><Download /></el-icon>
                   </button>
                   <button class="action-btn danger" @click.stop="handleDelete(file)" title="删除">
-                    <el-icon :size="18"><Delete /></el-icon>
+                    <el-icon :size="14"><Delete /></el-icon>
                   </button>
                 </div>
               </div>
@@ -262,40 +263,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue'
+import type {UploadProps, UploadUserFile} from 'element-plus'
+import {ElMessage, ElMessageBox} from 'element-plus'
+import {useRouter} from 'vue-router'
 import {
-  Delete,
-  Download,
-  ZoomIn,
-  Picture,
-  Document,
-  VideoCamera,
-  Headset,
-  FolderOpened,
-  Upload,
-  Refresh,
-  Plus,
-  Select,
-  Check,
   ArrowLeft,
   ArrowRight,
+  Check,
   Close,
+  Delete,
+  Document,
+  DocumentCopy,
+  Download,
+  FolderOpened,
+  Headset,
   Loading,
+  Picture,
+  Plus,
+  Refresh,
+  Select,
+  Upload,
+  VideoCamera,
 } from '@element-plus/icons-vue'
-import type { BucketInfo, FileObject } from '@/services/minio'
+import type {BucketInfo, FileObject} from '@/services/minio'
 import {
+  batchRemoveObjects,
+  getPresignedUrl,
+  initMinioClient,
   listBuckets,
   listObjectsPaginated,
-  getPresignedUrl,
   removeObject,
-  initMinioClient,
   uploadFile,
-  batchRemoveObjects,
 } from '@/services/minio'
-import { getMinioConfig, hasMinioConfig } from '@/utils/storage'
-import type { UploadProps, UploadUserFile } from 'element-plus'
+import {getMinioConfig, hasMinioConfig} from '@/utils/storage'
 
 const router = useRouter()
 
@@ -649,21 +650,43 @@ const handleRefresh = async () => {
   await loadFiles(true)
 }
 
+const handleCopy = async (file: FileObject) => {
+  try {
+    // 获取当前配置，构建直接 URL（公开桶不需要签名参数）
+    const config = getMinioConfig()
+    if (!config) {
+      ElMessage.error('未找到配置')
+      return
+    }
+    const protocol = config.useSSL ? 'https' : 'http'
+    // 标准端口不显示（443 for https, 80 for http）
+    const isDefaultPort = (config.useSSL && config.port === 443) || (!config.useSSL && config.port === 80)
+    const portPart = isDefaultPort ? '' : `:${config.port}`
+    const url = `${protocol}://${config.endpoint}${portPart}/${selectedBucket.value}/${file.name}`
+    // 获取文件名（不含路径）
+    const fileName = file.name.split('/').pop() || file.name
+    // 生成 Markdown 格式链接
+    const markdown = file.isImage
+      ? `![${fileName}](${url})`
+      : `[${fileName}](${url})`
+    await navigator.clipboard.writeText(markdown)
+    ElMessage.success('已复制 Markdown 链接')
+  } catch (error) {
+    ElMessage.error('复制失败：' + (error as Error).message)
+  }
+}
+
 const handlePreview = async (file: FileObject) => {
   if (selectionMode.value) return
-
   try {
     const index = files.value.findIndex((f) => f.name === file.name)
     if (index !== -1) {
       currentPreviewIndex.value = index
     }
-
-    const url = await getPresignedUrl(selectedBucket.value, file.name)
-    previewUrl.value = url
+    previewUrl.value = await getPresignedUrl(selectedBucket.value, file.name)
     previewFileName.value = file.name
     previewFileType.value = file.fileType
     previewVisible.value = true
-
     document.body.style.overflow = 'hidden'
   } catch (error) {
     ElMessage.error('获取预览链接失败：' + (error as Error).message)
@@ -1228,32 +1251,32 @@ const handleCardClick = (file: FileObject) => {
 
 .hover-actions {
   position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  left: calc(50% - 44px);
+  bottom: 8px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
 
 .action-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   border: none;
-  background: white;
+  background: rgba(255, 255, 255, 0.95);
   color: #18181b;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 
   &:hover {
-    background: #f4f4f5;
-    transform: scale(1.05);
+    background: white;
+    transform: scale(1.1);
   }
 
   &.danger:hover {

@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
+  GetBucketPolicyCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { MinioConfigBase } from '@/utils/storage'
@@ -12,6 +13,7 @@ import type { MinioConfigBase } from '@/utils/storage'
 export interface BucketInfo {
   name: string
   creationDate: Date
+  isPublic?: boolean
 }
 
 export interface FileObject {
@@ -349,6 +351,49 @@ export async function batchRemoveObjects(
   } catch (error) {
     console.error('批量删除文件失败:', error)
     throw new Error('批量删除文件失败')
+  }
+}
+
+/**
+ * 检查桶是否公开
+ * 通过获取桶策略判断是否允许匿名访问
+ */
+export async function isBucketPublic(bucketName: string): Promise<boolean> {
+  try {
+    const client = getMinioClient()
+    const response = await client.send(
+      new GetBucketPolicyCommand({
+        Bucket: bucketName,
+      })
+    )
+
+    if (!response.Policy) return false
+
+    const policy = JSON.parse(response.Policy)
+    // 检查是否有允许匿名访问的语句
+    // 公开桶通常有 Principal: "*" 或 Principal: { AWS: "*" } 且 Action 包含 s3:GetObject
+    for (const statement of policy.Statement || []) {
+      const principal = statement.Principal
+      const isPublicPrincipal =
+        principal === '*' ||
+        principal?.AWS === '*' ||
+        (Array.isArray(principal?.AWS) && principal.AWS.includes('*'))
+
+      const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action]
+      const hasGetObject = actions.some((a: string) =>
+        a === 's3:GetObject' || a === 's3:*' || a === '*'
+      )
+
+      if (statement.Effect === 'Allow' && isPublicPrincipal && hasGetObject) {
+        return true
+      }
+    }
+
+    return false
+  } catch (error) {
+    // 如果没有策略或获取失败，认为是私有桶
+    console.error('获取桶策略失败:', error)
+    return false
   }
 }
 

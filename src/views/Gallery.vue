@@ -291,6 +291,7 @@ import {
   batchRemoveObjects,
   getPresignedUrl,
   initMinioClient,
+  isBucketPublic,
   listBuckets,
   listObjectsPaginated,
   removeObject,
@@ -319,6 +320,9 @@ interface BucketCacheData {
   hasMore: boolean
 }
 const bucketCache = new Map<string, BucketCacheData>()
+
+// 桶公开状态缓存
+const bucketPublicCache = new Map<string, boolean>()
 
 // 缩略图懒加载相关
 const fileCardRefs = new Map<string, Element>()
@@ -652,25 +656,38 @@ const handleRefresh = async () => {
 
 const handleCopy = async (file: FileObject) => {
   try {
-    // 获取当前配置，构建直接 URL（公开桶不需要签名参数）
     const config = getMinioConfig()
     if (!config) {
       ElMessage.error('未找到配置')
       return
     }
-    const protocol = config.useSSL ? 'https' : 'http'
-    // 标准端口不显示（443 for https, 80 for http）
-    const isDefaultPort = (config.useSSL && config.port === 443) || (!config.useSSL && config.port === 80)
-    const portPart = isDefaultPort ? '' : `:${config.port}`
-    const url = `${protocol}://${config.endpoint}${portPart}/${selectedBucket.value}/${file.name}`
-    // 获取文件名（不含路径）
+
+    // 检查桶是否公开（带缓存）
+    let isPublic = bucketPublicCache.get(selectedBucket.value)
+    if (isPublic === undefined) {
+      isPublic = await isBucketPublic(selectedBucket.value)
+      bucketPublicCache.set(selectedBucket.value, isPublic)
+    }
+
+    let url: string
+    if (isPublic) {
+      // 公开桶：直接 URL
+      const protocol = config.useSSL ? 'https' : 'http'
+      const isDefaultPort = (config.useSSL && config.port === 443) || (!config.useSSL && config.port === 80)
+      const portPart = isDefaultPort ? '' : `:${config.port}`
+      url = `${protocol}://${config.endpoint}${portPart}/${selectedBucket.value}/${file.name}`
+    } else {
+      // 私有桶：预签名 URL
+      url = await getPresignedUrl(selectedBucket.value, file.name)
+    }
+
     const fileName = file.name.split('/').pop() || file.name
-    // 生成 Markdown 格式链接
     const markdown = file.isImage
       ? `![${fileName}](${url})`
       : `[${fileName}](${url})`
+
     await navigator.clipboard.writeText(markdown)
-    ElMessage.success('已复制 Markdown 链接')
+    ElMessage.success(isPublic ? '已复制 Markdown 链接' : '已复制 Markdown 链接（带签名，有效期1小时）')
   } catch (error) {
     ElMessage.error('复制失败：' + (error as Error).message)
   }

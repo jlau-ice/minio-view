@@ -1,8 +1,8 @@
 <template>
   <div class="header-wrapper">
     <div class="header-left cursor-pointer">
-      <img src="@/assets/ice.svg" width="28" height="28" alt="MinIO View" class="logo" />
-      <span class="brand-name">MinIO View</span>
+      <!-- <img src="@/assets/ice.svg" width="38" height="38" alt="MinIO View" class="logo" /> -->
+      <Logo class="logo"/>
     </div>
     <nav class="header-nav">
       <router-link
@@ -29,7 +29,7 @@
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Picture, Setting } from '@element-plus/icons-vue'
-
+import Logo from '@/components/logo/index.vue'
 const route = useRoute()
 const activeIndex = ref(route.path)
 
@@ -43,7 +43,7 @@ watch(() => route.path, (newPath) => {
   height: 100%;
   max-width: 1400px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -58,7 +58,7 @@ watch(() => route.path, (newPath) => {
     transition: transform 0.3s ease;
 
     &:hover {
-      transform: rotate(10deg);
+      transform: rotate(3deg);
     }
   }
 

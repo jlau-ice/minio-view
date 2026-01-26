@@ -4,7 +4,6 @@
       <h1 class="page-title">设置</h1>
       <p class="page-desc">配置 MinIO 连接信息</p>
     </div>
-
     <div class="settings-card">
       <el-form
         ref="formRef"
@@ -55,8 +54,8 @@
         </div>
 
         <div class="form-actions">
-          <el-button @click="handleClear">清除配置</el-button>
-          <el-button @click="handleTestConnection" :loading="testing">测试连接</el-button>
+          <el-button type="success" plain @click="handleTestConnection" :loading="testing">测试连接</el-button>
+          <el-button plain type="danger" @click="handleClear" >清除配置</el-button>
           <el-button type="primary" :loading="loading" @click="handleSave">保存配置</el-button>
         </div>
       </el-form>
@@ -180,7 +179,8 @@ const handleClear = () => {
 }
 
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 12px;
+  margin-left: 5px;
 }
 
 .page-title {
@@ -201,13 +201,12 @@ const handleClear = () => {
   background: white;
   border-radius: 16px;
   border: 1px solid #e4e4e7;
-  padding: 32px;
+  padding: 25px;
 }
 
 .config-form {
   .form-section {
-    margin-bottom: 32px;
-
+    margin-bottom: 20px;
     &:last-of-type {
       margin-bottom: 0;
     }
@@ -272,7 +271,7 @@ const handleClear = () => {
 
 .form-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: 32px;
   padding-top: 24px;

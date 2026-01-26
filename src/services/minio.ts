@@ -189,6 +189,61 @@ export async function listObjects(bucketName: string): Promise<FileObject[]> {
 }
 
 /**
+ * 分页列举桶中的文件结果
+ */
+export interface ListObjectsResult {
+  objects: FileObject[]
+  nextToken?: string
+  hasMore: boolean
+}
+
+/**
+ * 分页列举桶中的文件
+ */
+export async function listObjectsPaginated(
+  bucketName: string,
+  pageSize: number = 100,
+  continuationToken?: string
+): Promise<ListObjectsResult> {
+  try {
+    const client = getMinioClient()
+
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucketName,
+        MaxKeys: pageSize,
+        ContinuationToken: continuationToken,
+      })
+    )
+
+    const objects: FileObject[] = []
+    if (response.Contents) {
+      response.Contents.forEach((obj) => {
+        if (obj.Key) {
+          objects.push({
+            name: obj.Key,
+            lastModified: obj.LastModified || new Date(),
+            size: obj.Size || 0,
+            etag: obj.ETag || '',
+            isImage: isImageFile(obj.Key),
+            fileType: getFileType(obj.Key),
+          })
+        }
+      })
+    }
+
+    return {
+      objects,
+      nextToken: response.NextContinuationToken,
+      hasMore: !!response.IsTruncated,
+    }
+  } catch (error) {
+    console.error('获取文件列表失败:', error)
+    throw new Error('获取文件列表失败')
+  }
+}
+
+/**
  * 获取文件预签名 URL
  */
 export async function getPresignedUrl(

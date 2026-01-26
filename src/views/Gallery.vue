@@ -2,7 +2,8 @@
   <div class="gallery-page">
     <!-- 顶部操作栏 -->
     <div class="page-header">
-      <div class="header-top">
+      <div class="header-content">
+        <div class="header-top">
         <div class="title-section">
           <h1 class="page-title">图库</h1>
           <div class="stats">
@@ -56,6 +57,7 @@
         </div>
       </div>
     </div>
+  </div>
 
     <!-- 文件列表 -->
     <div v-loading="loadingFiles" class="content-area">
@@ -150,6 +152,20 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- 无限滚动哨兵元素 -->
+        <div ref="loadMoreTrigger" class="load-more-trigger">
+          <template v-if="loadingMore">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span>正在加载...</span>
+          </template>
+          <template v-else-if="hasMore">
+            <span class="load-hint">已加载 {{ files.length }} 个文件，滚动加载更多</span>
+          </template>
+          <template v-else>
+            <span class="no-more">全部 {{ files.length }} 个文件已加载完成</span>
+          </template>
         </div>
       </div>
     </div>
@@ -266,11 +282,12 @@ import {
   ArrowLeft,
   ArrowRight,
   Close,
+  Loading,
 } from '@element-plus/icons-vue'
 import type { BucketInfo, FileObject } from '@/services/minio'
 import {
   listBuckets,
-  listObjects,
+  listObjectsPaginated,
   getPresignedUrl,
   removeObject,
   initMinioClient,
@@ -288,13 +305,28 @@ const files = ref<FileWithUrl[]>([])
 const loading = ref(false)
 const loadingFiles = ref(false)
 
-// 缓存：桶名 -> 文件列表（包含缩略图URL）
-const bucketCache = new Map<string, FileWithUrl[]>()
+// 分页状态
+const pageSize = 100
+const nextToken = ref<string | undefined>()
+const hasMore = ref(true)
+const loadingMore = ref(false)
+
+// 缓存结构
+interface BucketCacheData {
+  files: FileWithUrl[]
+  nextToken?: string
+  hasMore: boolean
+}
+const bucketCache = new Map<string, BucketCacheData>()
 
 // 缩略图懒加载相关
 const fileCardRefs = new Map<string, Element>()
 let thumbnailObserver: IntersectionObserver | null = null
 const loadingThumbnails = new Set<string>() // 防止重复加载
+
+// 无限滚动相关
+const loadMoreTrigger = ref<HTMLElement | null>(null)
+let loadMoreObserver: IntersectionObserver | null = null
 
 const previewVisible = ref(false)
 const previewUrl = ref('')
@@ -423,34 +455,91 @@ const loadFiles = async (forceRefresh = false) => {
   // 检查缓存
   const cached = bucketCache.get(selectedBucket.value)
   if (!forceRefresh && cached) {
-    files.value = cached
+    files.value = cached.files
+    nextToken.value = cached.nextToken
+    hasMore.value = cached.hasMore
     // 缓存的数据也需要设置观察器（可能有未加载的缩略图）
     nextTick(() => {
       setupThumbnailObserver()
+      setupLoadMoreObserver()
     })
     return
   }
 
   loadingFiles.value = true
+  // 重置分页状态
+  nextToken.value = undefined
+  hasMore.value = true
 
   try {
-    const objectList = await listObjects(selectedBucket.value)
-    files.value = objectList.map((file) => ({
+    const result = await listObjectsPaginated(selectedBucket.value, pageSize)
+    files.value = result.objects.map((file) => ({
       ...file,
       thumbnailUrl: undefined,
       loading: false,
     }))
+    nextToken.value = result.nextToken
+    hasMore.value = result.hasMore
 
     // 更新缓存
-    bucketCache.set(selectedBucket.value, [...files.value])
+    bucketCache.set(selectedBucket.value, {
+      files: [...files.value],
+      nextToken: nextToken.value,
+      hasMore: hasMore.value,
+    })
     // 下一帧启动懒加载观察
     nextTick(() => {
       setupThumbnailObserver()
+      setupLoadMoreObserver()
     })
   } catch (error) {
     ElMessage.error('加载文件列表失败：' + (error as Error).message)
   } finally {
     loadingFiles.value = false
+  }
+}
+
+// 加载更多文件
+const loadMoreFiles = async () => {
+  if (!selectedBucket.value || !hasMore.value || loadingMore.value || !nextToken.value) return
+
+  loadingMore.value = true
+
+  try {
+    const result = await listObjectsPaginated(selectedBucket.value, pageSize, nextToken.value)
+    const newFiles = result.objects.map((file) => ({
+      ...file,
+      thumbnailUrl: undefined,
+      loading: false,
+    }))
+
+    files.value = [...files.value, ...newFiles]
+    nextToken.value = result.nextToken
+    hasMore.value = result.hasMore
+
+    // 更新缓存
+    bucketCache.set(selectedBucket.value, {
+      files: [...files.value],
+      nextToken: nextToken.value,
+      hasMore: hasMore.value,
+    })
+
+    // 提示用户新文件可能在上方（因为按时间排序）
+    if (newFiles.length > 0) {
+      ElMessage.success({
+        message: `已加载 ${newFiles.length} 个文件（按时间排序，新内容可能在上方）`,
+        duration: 2000,
+      })
+    }
+
+    // 新文件需要设置缩略图观察
+    nextTick(() => {
+      setupThumbnailObserver()
+    })
+  } catch (error) {
+    ElMessage.error('加载更多失败：' + (error as Error).message)
+  } finally {
+    loadingMore.value = false
   }
 }
 
@@ -476,7 +565,11 @@ const loadSingleThumbnail = async (fileName: string) => {
   try {
     file.thumbnailUrl = await getPresignedUrl(selectedBucket.value, fileName)
     // 更新缓存
-    bucketCache.set(selectedBucket.value, [...files.value])
+    bucketCache.set(selectedBucket.value, {
+      files: [...files.value],
+      nextToken: nextToken.value,
+      hasMore: hasMore.value,
+    })
   } catch (error) {
     console.error(`加载缩略图失败 ${fileName}:`, error)
   } finally {
@@ -520,6 +613,32 @@ const setupThumbnailObserver = () => {
       thumbnailObserver?.observe(el)
     }
   })
+}
+
+// 设置无限滚动观察器
+const setupLoadMoreObserver = () => {
+  // 清理旧的 observer
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+  }
+
+  if (!loadMoreTrigger.value) return
+
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting && hasMore.value && !loadingMore.value) {
+          loadMoreFiles()
+        }
+      })
+    },
+    {
+      rootMargin: '200px', // 提前 200px 开始加载
+      threshold: 0.1,
+    }
+  )
+
+  loadMoreObserver.observe(loadMoreTrigger.value)
 }
 
 const handleBucketChange = async () => {
@@ -682,6 +801,10 @@ onUnmounted(() => {
     thumbnailObserver.disconnect()
     thumbnailObserver = null
   }
+  if (loadMoreObserver) {
+    loadMoreObserver.disconnect()
+    loadMoreObserver = null
+  }
   fileCardRefs.clear()
   loadingThumbnails.clear()
 })
@@ -825,14 +948,22 @@ const handleCardClick = (file: FileObject) => {
 <style scoped lang="scss">
 .gallery-page {
   min-height: 100%;
-  padding: 24px;
-  max-width: 1440px;
-  margin: 0 auto;
 }
 
-// 头部
+// 头部 - 亚克力毛玻璃效果
 .page-header {
-  margin-bottom: 32px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.header-content {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 12px 24px;
 }
 
 .header-top {
@@ -897,6 +1028,9 @@ const handleCardClick = (file: FileObject) => {
 // 内容区
 .content-area {
   min-height: 400px;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px;
 }
 
 .empty-state {
@@ -948,6 +1082,41 @@ const handleCardClick = (file: FileObject) => {
     background-color: #f4f4f5;
     padding: 2px 8px;
     border-radius: 10px;
+  }
+}
+
+// 无限滚动加载更多
+.load-more-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: #71717a;
+  font-size: 14px;
+
+  .is-loading {
+    animation: rotating 1.5s linear infinite;
+  }
+
+  .load-hint {
+    color: #a1a1aa;
+  }
+
+  .no-more {
+    color: #a1a1aa;
+    padding: 8px 16px;
+    background: #f4f4f5;
+    border-radius: 16px;
+  }
+}
+
+@keyframes rotating {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
